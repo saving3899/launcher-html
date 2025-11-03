@@ -94,17 +94,33 @@ class CharacterManager {
             }
             
             // 새 캐릭터의 채팅 로드 또는 생성
-            // 중요: loadOrCreateChat() 호출 전에 채팅 영역이 완전히 비어있는지 확인
             if (chatManager) {
-                // 채팅 영역이 비어있는지 확인하고, 아니면 다시 초기화
-                if (chatManager.elements && chatManager.elements.chatMessages) {
-                    if (chatManager.elements.chatMessages.children.length > 0) {
-                        // 경고 코드 토스트 알림 표시
-                        if (typeof showErrorCodeToast === 'function') {
-                            showErrorCodeToast('WARN_CHAR_20001', '채팅 메시지가 여전히 존재함');
+                // 같은 캐릭터를 다시 선택하는 경우 처리
+                // chatManager.currentCharacterId를 우선 확인 (더 정확함)
+                const isSameCharacter = chatManager.currentCharacterId === characterId || previousCharacterId === characterId;
+                
+                if (isSameCharacter) {
+                    // 이미 같은 캐릭터의 채팅이 로드되어 있는지 확인
+                    if (chatManager.currentCharacterId === characterId && chatManager.currentChatId) {
+                        // 같은 캐릭터의 채팅이 이미 로드되어 있으면 그대로 사용
+                        // (채팅 로드 또는 생성 스킵)
+                        return;
+                    }
+                    // 같은 캐릭터이지만 채팅이 로드되지 않은 경우는 계속 진행
+                    // (경고 없이 채팅 로드 또는 생성)
+                } else {
+                    // 다른 캐릭터로 변경하는 경우: 채팅 영역이 비어있어야 함
+                    // (이미 위에서 초기화했지만, 혹시 남아있으면 다시 확인)
+                    if (chatManager.elements && chatManager.elements.chatMessages) {
+                        if (chatManager.elements.chatMessages.children.length > 0) {
+                            // 다른 캐릭터로 변경할 때만 경고 표시
+                            // 경고 코드 토스트 알림 표시
+                            if (typeof showErrorCodeToast === 'function') {
+                                showErrorCodeToast('WARN_CHAR_20001', '채팅 메시지가 여전히 존재함');
+                            }
+                            chatManager.elements.chatMessages.innerHTML = '';
+                            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
                         }
-                        chatManager.elements.chatMessages.innerHTML = '';
-                        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
                     }
                 }
                 

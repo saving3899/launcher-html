@@ -447,12 +447,16 @@
 }
 
 /* 모달 */
+/* ============================================
+   모달 스타일
+   ============================================ */
+
+/* 모달 컨테이너 */
 .modal {
     position: fixed;
     top: 0;
     left: 0;
     width: 100%;
-    height: 100%;
     height: 100dvh;
     z-index: 300;
     display: flex;
@@ -466,6 +470,7 @@
     display: none;
 }
 
+/* 모달 콘텐츠 */
 .modal-content {
     background: var(--bg-secondary);
     backdrop-filter: blur(20px);
@@ -477,10 +482,11 @@
     max-height: calc(100dvh - 2 * var(--spacing-md));
     display: flex;
     flex-direction: column;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+    box-shadow: var(--shadow-lg);
     box-sizing: border-box;
 }
 
+/* 모달 헤더 */
 .modal-header {
     display: flex;
     align-items: center;
@@ -492,11 +498,24 @@
 .modal-header h2 {
     font-size: 20px;
     font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
 }
 
+/* 모달 바디 */
 .modal-body {
     padding: var(--spacing-lg);
     overflow-y: auto;
+    color: var(--text-primary);
+}
+
+/* 모달 푸터 */
+.modal-footer {
+    display: flex;
+    gap: var(--spacing-md);
+    justify-content: flex-end;
+    padding: var(--spacing-lg);
+    border-top: 1px solid var(--border-color);
 }
 
 /* 모달 내부 폼 그룹 및 라벨 스타일 */
@@ -523,13 +542,15 @@
     margin-top: 0;
 }
 
-/* 오버레이 */
+/* ============================================
+   오버레이 스타일
+   ============================================ */
+
 .overlay {
     position: fixed;
     top: 0;
     left: 0;
     width: 100%;
-    height: 100%;
     height: 100dvh;
     background: rgba(0, 0, 0, 0.3);
     z-index: 150;

@@ -31,6 +31,7 @@ async function callOpenAI({
     signal = null,
     onChunk = null,
     proxyUrl = null, // 프록시 URL (선택사항)
+    seed = undefined, // seed 파라미터 추가
 }) {
     if (!apiKey) {
         throw new Error('OpenAI API 키가 필요합니다.');
@@ -50,6 +51,11 @@ async function callOpenAI({
     // 선택적 필드 추가
     if (Array.isArray(stop) && stop.length > 0) {
         requestBody.stop = stop;
+    }
+    
+    // seed 파라미터 추가 (seed가 정의되어 있고 >= 0일 때만)
+    if (seed !== undefined && seed >= 0) {
+        requestBody.seed = seed;
     }
 
     // 세이프티 세팅: OpenAI는 기본적으로 모더레이션 검사가 없지만,

@@ -306,6 +306,20 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
                 persona_description_position: settings.persona_description_position ?? 0,
                 // Squash System Messages 설정
                 squash_system_messages: settings.squash_system_messages !== false, // 기본값 true
+                // Wrap in Quotes 설정
+                wrap_in_quotes: settings.wrap_in_quotes || false,
+                // Continue Prefill 설정
+                continue_prefill: settings.continue_prefill || false,
+                // Utility Prompts
+                new_chat_prompt: settings.new_chat_prompt || '',
+                new_group_chat_prompt: settings.new_group_chat_prompt || '',
+                new_example_chat_prompt: settings.new_example_chat_prompt || '[Example Chat]',
+                continue_nudge_prompt: settings.continue_nudge_prompt || '',
+                wi_format: settings.wi_format || '{0}',
+                scenario_format: settings.scenario_format || '{{scenario}}',
+                personality_format: settings.personality_format || '{{personality}}',
+                group_nudge_prompt: settings.group_nudge_prompt || '',
+                impersonation_prompt: settings.impersonation_prompt || '',
             },
             finalTokenCountFn, // 실제 토큰 계산 함수 전달
             generateType // 생성 타입 전달
@@ -353,12 +367,15 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
         return;
     }
 
-    // API 호출 (초기에는 비스트리밍으로 시작)
-    const streamEnabled = settings.stream_toggle !== false; // 기본값 true
+    // API 호출: 스트리밍 설정 확인 (실리태번과 동일)
+    // stream_openai 또는 stream_toggle 확인
+    const streamEnabled = settings.stream_openai !== undefined 
+        ? settings.stream_openai 
+        : (settings.stream_toggle !== undefined ? settings.stream_toggle : true); // 기본값 true
     let responseText = '';
 
 
-    // Vertex AI 추가 옵션 준비
+    // API 옵션 준비
     const apiOptions = {
         apiKey,
         model,
@@ -369,6 +386,84 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
         signal: chatManager.abortController?.signal, // AbortSignal 추가
     };
     
+    // seed 파라미터 추가 (seed >= 0일 때만 전달, -1이면 무작위 시드이므로 전달하지 않음)
+    if (settings.seed !== undefined && settings.seed >= 0) {
+        apiOptions.seed = settings.seed;
+    }
+    
+    // 토큰 최적화 옵션 추가 (설정에서 읽기)
+    const tokenOptimizationSettings = settings.tokenOptimization || {};
+    
+    // reasoning_effort는 settings에서 직접 읽기 (프롬프트 패널에서 설정)
+    const reasoningEffort = settings.reasoning_effort || settings.openai_reasoning_effort || tokenOptimizationSettings.reasoningEffort;
+    
+    // Claude/Anthropic 및 OpenRouter용 캐싱 옵션
+    if (apiProvider === 'claude' || apiProvider === 'anthropic' || apiProvider === 'openrouter') {
+        // 설정에서 읽거나 기본값 사용
+        if (typeof tokenOptimizationSettings.cachingAtDepth === 'number') {
+            apiOptions.cachingAtDepth = tokenOptimizationSettings.cachingAtDepth;
+        }
+        if (typeof tokenOptimizationSettings.enableSystemPromptCache === 'boolean') {
+            apiOptions.enableSystemPromptCache = tokenOptimizationSettings.enableSystemPromptCache;
+        }
+        if (typeof tokenOptimizationSettings.extendedTTL === 'boolean') {
+            apiOptions.extendedTTL = tokenOptimizationSettings.extendedTTL;
+        }
+        // Reasoning effort 설정
+        if (reasoningEffort) {
+            apiOptions.reasoningEffort = reasoningEffort;
+        }
+    }
+    
+    // Gemini/Vertex AI용 reasoning 옵션
+    if (apiProvider === 'makersuite' || apiProvider === 'gemini' || apiProvider === 'vertexai') {
+        if (reasoningEffort) {
+            apiOptions.reasoningEffort = reasoningEffort;
+        }
+        // show_thoughts 체크박스가 체크되어 있으면 includeReasoning 활성화
+        const showThoughts = settings.show_thoughts || settings.openai_show_thoughts || false;
+        if (showThoughts) {
+            apiOptions.includeReasoning = true;
+        } else if (typeof tokenOptimizationSettings.includeReasoning === 'boolean') {
+            apiOptions.includeReasoning = tokenOptimizationSettings.includeReasoning;
+        }
+    }
+
+    // 웹 검색 활성화 (지원되는 API에만)
+    const enableWebSearch = settings.enable_web_search || settings.openai_enable_web_search || false;
+    if (enableWebSearch && ['makersuite', 'vertexai', 'aimlapi', 'openrouter', 'claude', 'xai', 'electronhub', 'nanogpt'].includes(apiProvider)) {
+        apiOptions.enableWebSearch = true;
+    }
+
+    // 함수 호출 활성화 (지원되는 API에만)
+    const functionCalling = settings.function_calling || settings.openai_function_calling || false;
+    if (functionCalling && ['openai', 'cohere', 'mistralai', 'custom', 'claude', 'aimlapi', 'openrouter', 'groq', 'deepseek', 'makersuite', 'vertexai', 'ai21', 'xai', 'pollinations', 'moonshot', 'fireworks', 'cometapi', 'electronhub', 'azure_openai', 'zai'].includes(apiProvider)) {
+        apiOptions.functionCalling = true;
+    }
+
+    // 이미지 인라이닝 활성화 (지원되는 API에만, 메시지 준비는 별도 처리 필요)
+    const imageInlining = settings.image_inlining || settings.openai_image_inlining || false;
+    if (imageInlining && ['openai', 'aimlapi', 'openrouter', 'mistralai', 'makersuite', 'vertexai', 'claude', 'custom', 'xai', 'pollinations', 'moonshot', 'cohere', 'cometapi', 'nanogpt', 'electronhub', 'azure_openai', 'zai'].includes(apiProvider)) {
+        apiOptions.imageInlining = true;
+    }
+
+    // 비디오 인라이닝 활성화 (지원되는 API에만, 메시지 준비는 별도 처리 필요)
+    const videoInlining = settings.video_inlining || settings.openai_video_inlining || false;
+    if (videoInlining && ['makersuite', 'vertexai'].includes(apiProvider)) {
+        apiOptions.videoInlining = true;
+    }
+
+    // 이미지 요청 활성화 (지원되는 API에만)
+    const requestImages = settings.request_images || settings.openai_request_images || false;
+    if (requestImages && ['makersuite', 'vertexai'].includes(apiProvider)) {
+        apiOptions.requestImages = true;
+    }
+
+    // 시스템 프롬프트 사용 (Gemini/Vertex AI, Claude)
+    const useSysprompt = settings.use_sysprompt || settings.use_makersuite_sysprompt || settings.claude_use_sysprompt || false;
+    if (useSysprompt && ['makersuite', 'vertexai', 'claude', 'anthropic'].includes(apiProvider)) {
+        apiOptions.useSysprompt = true;
+    }
 
     // Vertex AI 특수 옵션
     if (apiProvider === 'vertexai') {
@@ -383,11 +478,13 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
     try {
         if (streamEnabled) {
             // 스트리밍 응답 처리
+            // generateType 전달 (계속하기 기능에서 사용)
             responseText = await chatManager.callAIWithStreaming(
                 apiProvider,
                 apiOptions,
                 characterName,
-                characterAvatar
+                characterAvatar,
+                generateType // 계속하기 여부 전달
             );
         } else {
             // 비스트리밍 응답 처리
@@ -396,8 +493,78 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
                 apiOptions
             );
 
-            // 정규식은 addMessage에서 적용되므로 원본 텍스트 전달
-            await chatManager.addMessage(responseText, 'assistant', characterName, characterAvatar);
+            // 계속하기 모드 처리
+            if (generateType === 'continue') {
+                // 기존 메시지 찾기
+                const chatMessages = chatManager.elements.chatMessages.querySelectorAll('.message-wrapper');
+                let existingMessageWrapper = null;
+                let existingMessageText = '';
+                let continuePostfix = '';
+                
+                for (let i = chatMessages.length - 1; i >= 0; i--) {
+                    const wrapper = chatMessages[i];
+                    if (wrapper.dataset.role === 'assistant') {
+                        existingMessageWrapper = wrapper;
+                        const existingTextElement = wrapper.querySelector('.message-text');
+                        if (existingTextElement) {
+                            existingMessageText = wrapper.dataset.originalText || existingTextElement.textContent || '';
+                        }
+                        break;
+                    }
+                }
+                
+                // continue_postfix 설정 확인
+                try {
+                    const settings = await SettingsStorage.load();
+                    const postfixValue = settings.continue_postfix || '';
+                    continuePostfix = postfixValue;
+                } catch (error) {
+                    continuePostfix = '';
+                }
+                
+                if (existingMessageWrapper) {
+                    // 기존 메시지 업데이트
+                    const finalText = existingMessageText + continuePostfix + responseText;
+                    existingMessageWrapper.dataset.originalText = finalText;
+                    
+                    // 메시지 텍스트 업데이트 (정규식 및 포맷팅 적용)
+                    const messageTextElement = existingMessageWrapper.querySelector('.message-text');
+                    if (messageTextElement) {
+                        // getRegexedString, REGEX_PLACEMENT - 전역 스코프에서 사용
+                        const processed = await getRegexedString(finalText, REGEX_PLACEMENT.AI_OUTPUT, {
+                            characterOverride: characterName || undefined,
+                            isMarkdown: true,
+                            isPrompt: false,
+                            depth: 0
+                        });
+                        
+                        // {{user}}, {{char}} 매크로 치환
+                        let userName = '';
+                        try {
+                            const settings = await SettingsStorage.load();
+                            const currentPersonaId = settings.currentPersonaId;
+                            if (currentPersonaId) {
+                                const persona = await UserPersonaStorage.load(currentPersonaId);
+                                if (persona?.name) {
+                                    userName = persona.name;
+                                }
+                            }
+                        } catch (error) {
+                            // 무시
+                        }
+                        const processedWithMacros = substituteParams(processed, userName, characterName || '');
+                        messageTextElement.innerHTML = messageFormatting(processedWithMacros, userName, characterName || '');
+                        chatManager.renderHtmlIframesInElement(messageTextElement);
+                        chatManager.scrollToBottom();
+                    }
+                } else {
+                    // 기존 메시지를 찾을 수 없으면 새 메시지 추가
+                    await chatManager.addMessage(responseText, 'assistant', characterName, characterAvatar);
+                }
+            } else {
+                // 정규식은 addMessage에서 적용되므로 원본 텍스트 전달
+                await chatManager.addMessage(responseText, 'assistant', characterName, characterAvatar);
+            }
         }
     } catch (error) {
         // AbortError는 상위로 전파

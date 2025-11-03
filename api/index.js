@@ -27,6 +27,17 @@
  * @param {string} options.vertexaiRegion - Vertex AI Region (기본값: 'us-central1')
  * @param {string} options.vertexaiProjectId - Vertex AI Project ID (선택사항)
  * @param {string|object} options.vertexaiServiceAccountJson - Vertex AI Service Account JSON (Full 모드만 필요)
+ * @param {string} options.reasoningEffort - Reasoning effort ('auto', 'min', 'low', 'medium', 'high', 'max')
+ * @param {number} options.cachingAtDepth - 캐싱할 깊이 (-1이면 비활성화, 0 이상이면 활성화)
+ * @param {boolean} options.enableSystemPromptCache - 시스템 프롬프트 캐싱 활성화
+ * @param {boolean} options.extendedTTL - 캐시 TTL 연장 (false면 5m, true면 1h)
+ * @param {boolean} options.includeReasoning - Reasoning thoughts 포함 여부 (Gemini만)
+ * @param {boolean} options.enableWebSearch - 웹 검색 활성화
+ * @param {boolean} options.functionCalling - 함수 호출 활성화
+ * @param {boolean} options.imageInlining - 이미지 인라이닝 활성화
+ * @param {boolean} options.videoInlining - 비디오 인라이닝 활성화
+ * @param {boolean} options.requestImages - 이미지 요청 활성화
+ * @param {boolean} options.useSysprompt - 시스템 프롬프트 사용 (Gemini/Claude)
  * @returns {Promise<string>} 응답 텍스트
  */
 async function callAI({
@@ -50,6 +61,18 @@ async function callAI({
     vertexaiRegion = 'us-central1',
     vertexaiProjectId = null,
     vertexaiServiceAccountJson = null,
+    reasoningEffort = 'auto',
+    cachingAtDepth = -1,
+    enableSystemPromptCache = false,
+    extendedTTL = false,
+    includeReasoning = false,
+    enableWebSearch = false,
+    functionCalling = false,
+    imageInlining = false,
+    videoInlining = false,
+    requestImages = false,
+    useSysprompt = false,
+    seed = undefined, // seed 파라미터 추가
 }) {
     if (!apiSource) {
         throw new Error(`API 소스가 지정되지 않았습니다.`);
@@ -71,6 +94,7 @@ async function callAI({
                     signal,
                     onChunk,
                     proxyUrl,
+                    seed, // seed 파라미터 전달
                 });
 
             case 'claude':
@@ -86,6 +110,12 @@ async function callAI({
                     signal,
                     onChunk,
                     system: systemInstruction,
+                    reasoningEffort,
+                    cachingAtDepth,
+                    enableSystemPromptCache,
+                    extendedTTL,
+                    enableWebSearch,
+                    useSysprompt,
                 });
 
             case 'makersuite':
@@ -102,6 +132,12 @@ async function callAI({
                     signal,
                     onChunk,
                     systemInstruction,
+                    reasoningEffort,
+                    includeReasoning,
+                    enableWebSearch,
+                    requestImages,
+                    useSysprompt,
+                    seed, // seed 파라미터 전달
                 });
 
             case 'vertexai':
@@ -122,6 +158,12 @@ async function callAI({
                     region: vertexaiRegion || 'us-central1',
                     projectId: vertexaiProjectId || null,
                     serviceAccountJson: vertexaiServiceAccountJson || null,
+                    reasoningEffort,
+                    includeReasoning,
+                    enableWebSearch,
+                    requestImages,
+                    useSysprompt,
+                    seed, // seed 파라미터 전달
                 });
 
             case 'openrouter':
@@ -135,6 +177,10 @@ async function callAI({
                     stream,
                     signal,
                     onChunk,
+                    reasoningEffort,
+                    cachingAtDepth,
+                    extendedTTL,
+                    enableWebSearch,
                 });
 
             case 'mistralai':
@@ -214,6 +260,7 @@ async function callAI({
                     stream,
                     signal,
                     onChunk,
+                    enableWebSearch,
                 });
 
             case 'moonshot':
@@ -292,6 +339,7 @@ async function callAI({
                     stream,
                     signal,
                     onChunk,
+                    seed, // seed 파라미터 전달
                 });
 
             case 'zai':

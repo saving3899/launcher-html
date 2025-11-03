@@ -1269,20 +1269,36 @@ class ChatManager {
         
         if (!text) {
             // 입력창이 비어있을 때
-            if (chatHistory.length === 0) {
-                // 메시지가 0개: 프롬프트만 전송 (유저 메시지 없이)
-                generateType = 'normal';
-                shouldAddUserMessage = false;
-                userMessageToSend = '';
-            } else if (lastMessage) {
-                if (lastMessage.role === 'user') {
-                    // 마지막 메시지가 유저 메시지: 직전 메시지 그대로 사용 (유저 메시지 추가 안 함)
+            // 기존 로직 우선: 채팅이 비어있지 않으면 기존 continue/재전송 로직 사용
+            if (chatHistory.length > 0) {
+                // 기존 로직: continue 또는 재전송
+                if (lastMessage) {
+                    if (lastMessage.role === 'user') {
+                        // 마지막 메시지가 유저 메시지: 직전 메시지 그대로 사용 (재전송)
+                        generateType = 'normal';
+                        shouldAddUserMessage = false;
+                        userMessageToSend = ''; // 빈 문자열로 전달하면 채팅 히스토리의 마지막 유저 메시지가 사용됨
+                    } else if (lastMessage.role === 'assistant') {
+                        // 마지막 메시지가 캐릭터 메시지: continue로 이어서 생성
+                        generateType = 'continue';
+                        shouldAddUserMessage = false;
+                        userMessageToSend = '';
+                    }
+                }
+            } else {
+                // 채팅이 완전히 비어있을 때만 send_if_empty 사용 (기존 로직과 충돌 없음)
+                // SettingsStorage - 전역 스코프에서 사용
+                const settings = await SettingsStorage.load();
+                const sendIfEmpty = settings.send_if_empty || '';
+                
+                if (sendIfEmpty && sendIfEmpty.trim()) {
+                    // send_if_empty가 있으면 그 값을 사용자 메시지로 사용
+                    userMessageToSend = sendIfEmpty.trim();
+                    shouldAddUserMessage = true;
                     generateType = 'normal';
-                    shouldAddUserMessage = false;
-                    userMessageToSend = ''; // 빈 문자열로 전달하면 채팅 히스토리의 마지막 유저 메시지가 사용됨
-                } else if (lastMessage.role === 'assistant') {
-                    // 마지막 메시지가 캐릭터 메시지: continue로 이어서 생성
-                    generateType = 'continue';
+                } else {
+                    // send_if_empty도 없으면 기존 로직 (프롬프트만 전송)
+                    generateType = 'normal';
                     shouldAddUserMessage = false;
                     userMessageToSend = '';
                 }
@@ -1444,6 +1460,16 @@ class ChatManager {
                 if (isUser && forceAvatar) {
                     messageObj.force_avatar = forceAvatar;
                 }
+                
+                // 실리태번과 동일: name 필드 추가 (names_behavior 지원용)
+                // assistant 메시지의 경우 캐릭터 이름 저장
+                if (!isUser) {
+                    const characterNameFromWrapper = wrapper.dataset.characterName || null;
+                    if (characterNameFromWrapper) {
+                        messageObj.name = characterNameFromWrapper;
+                    }
+                }
+                // user 메시지의 경우 페르소나 이름은 name 필드에 저장하지 않음 (실리태번과 동일)
                 
                 history.push(messageObj);
             }
@@ -1712,8 +1738,14 @@ class ChatManager {
         const apiFunctions = {
             'openai': callOpenAI,
             'claude': callAnthropic,
+            'anthropic': callAnthropic,
             'makersuite': callGemini,
+            'gemini': callGemini,
+            'google': callGemini,
             'vertexai': callVertexAI,
+            'openrouter': callOpenRouter,
+            'mistralai': callMistral,
+            'mistral': callMistral,
             // TODO: 다른 API들 추가
         };
 
@@ -1748,14 +1780,21 @@ class ChatManager {
 
     /**
      * 스트리밍 API 호출
+     * @param {string} generateType - 생성 타입 ('normal' 또는 'continue')
      */
-    async callAIWithStreaming(apiProvider, options, characterName, characterAvatar) {
+    async callAIWithStreaming(apiProvider, options, characterName, characterAvatar, generateType = 'normal') {
         // API 함수 가져오기
         const apiFunctions = {
             'openai': callOpenAI,
             'claude': callAnthropic,
+            'anthropic': callAnthropic,
             'makersuite': callGemini,
+            'gemini': callGemini,
+            'google': callGemini,
             'vertexai': callVertexAI,
+            'openrouter': callOpenRouter,
+            'mistralai': callMistral,
+            'mistral': callMistral,
             // TODO: 다른 API들 추가
         };
 
@@ -1764,12 +1803,56 @@ class ChatManager {
             throw new Error(`지원하지 않는 API provider: ${apiProvider}`);
         }
 
-        // 플레이스홀더 메시지 생성 (스트리밍 중 업데이트됨)
+        // 계속하기 모드 확인 및 처리
+        let existingMessageWrapper = null;
+        let existingMessageText = '';
+        let continuePostfix = '';
+        
+        if (generateType === 'continue') {
+            // 실리태번과 동일: 계속하기 시 기존 메시지 찾기
+            const chatMessages = this.elements.chatMessages.querySelectorAll('.message-wrapper');
+            for (let i = chatMessages.length - 1; i >= 0; i--) {
+                const wrapper = chatMessages[i];
+                if (wrapper.dataset.role === 'assistant') {
+                    existingMessageWrapper = wrapper;
+                    const existingTextElement = wrapper.querySelector('.message-text');
+                    if (existingTextElement) {
+                        existingMessageText = wrapper.dataset.originalText || existingTextElement.textContent || '';
+                    }
+                    break;
+                }
+            }
+            
+            // continue_postfix 설정 확인 (SettingsStorage - 전역 스코프에서 사용)
+            try {
+                const settings = await SettingsStorage.load();
+                const postfixValue = settings.continue_postfix || '';
+                continuePostfix = postfixValue; // '', ' ', '\n', '\n\n'
+            } catch (error) {
+                // 기본값: 없음
+                continuePostfix = '';
+            }
+        }
+        
+        // 플레이스홀더 메시지 생성 (계속하기가 아니면 새 메시지, 계속하기면 기존 메시지 사용)
         const placeholderText = '';
-        const messageWrapper = await this.addMessage(placeholderText, 'assistant', characterName, characterAvatar, [], 0);
-        const messageTextElement = messageWrapper.querySelector('.message-text');
+        let messageWrapper;
+        let messageTextElement;
+        
+        if (generateType === 'continue' && existingMessageWrapper) {
+            // 계속하기: 기존 메시지 사용
+            messageWrapper = existingMessageWrapper;
+            messageTextElement = messageWrapper.querySelector('.message-text');
+            // 기존 텍스트 + postfix로 시작
+            fullText = existingMessageText + continuePostfix;
+        } else {
+            // 새 메시지 생성
+            messageWrapper = await this.addMessage(placeholderText, 'assistant', characterName, characterAvatar, [], 0);
+            messageTextElement = messageWrapper.querySelector('.message-text');
+            fullText = '';
+        }
 
-        let fullText = '';
+        let accumulatedFullText = fullText; // 기존 텍스트 + postfix + 새 텍스트
         
         // 정규식 함수를 미리 import
         // getRegexedString, REGEX_PLACEMENT - 전역 스코프에서 사용
@@ -1800,7 +1883,10 @@ class ChatManager {
                 if (apiOptions.signal?.aborted) {
                     throw new DOMException('The operation was aborted.', 'AbortError');
                 }
-                fullText += chunk;
+                // 계속하기 모드: 기존 텍스트 + postfix + 새 청크
+                accumulatedFullText += chunk;
+                // fullText는 새로 생성된 텍스트만 (기존 텍스트 제외)
+                fullText = accumulatedFullText.substring(existingMessageText.length + continuePostfix.length);
                 // 실시간으로 텍스트 업데이트
                 if (messageTextElement) {
                     // 실리태번과 동일: 스트리밍 중에도 depth 계산하여 정규식 적용
@@ -1811,7 +1897,9 @@ class ChatManager {
                     });
                     const depth = usableMessages.length > 0 ? 0 : undefined; // 스트리밍 중인 메시지는 가장 최근이므로 depth 0
                     
-                    const processed = await getRegexedString(fullText, REGEX_PLACEMENT.AI_OUTPUT, {
+                    // 계속하기 모드: 전체 텍스트 (기존 + postfix + 새 텍스트) 처리
+                    const textToProcess = generateType === 'continue' ? accumulatedFullText : fullText;
+                    const processed = await getRegexedString(textToProcess, REGEX_PLACEMENT.AI_OUTPUT, {
                         characterOverride: characterName || undefined, // 실리태번과 동일: 캐릭터 이름 전달
                         isMarkdown: true,
                         isPrompt: false,
@@ -1842,9 +1930,11 @@ class ChatManager {
         });
 
         // 최종 원본 텍스트 저장
-        messageWrapper.dataset.originalText = fullText;
+        // 계속하기 모드: 전체 텍스트 (기존 + postfix + 새 텍스트) 저장
+        const finalText = generateType === 'continue' ? accumulatedFullText : fullText;
+        messageWrapper.dataset.originalText = finalText;
 
-        return fullText;
+        return finalText;
     }
 
     /**

@@ -108,7 +108,7 @@ function showToast(message, type = 'info') {
             // 초록색 토스트는 자동 닫기 설정
             if (isAutoClose) {
                 const progressFill = toast.querySelector('.toast-progress-fill');
-                const duration = 20000; // 20초
+                const duration = 12000; // 12초
                 const updateInterval = 50; // 50ms마다 업데이트
                 let totalElapsed = 0; // 누적 경과 시간
                 let lastStartTime = Date.now(); // 마지막 시작 시간
@@ -177,7 +177,7 @@ function showToast(message, type = 'info') {
                 lastStartTime = Date.now();
                 startProgress();
                 
-                // 20초 후 자동 닫기 (백업용)
+                // 12초 후 자동 닫기 (백업용)
                 closeTimer = setTimeout(closeToast, duration);
             }
         });
@@ -240,13 +240,15 @@ function showErrorCodeToast(errorCode, description, error = null) {
     }
     
     toast.innerHTML = `
-        <div class="toast-content">
-            <div class="toast-icon">${icon}</div>
-            <div class="toast-message">${messageText}</div>
+        <div class="toast-wrapper">
+            <div class="toast-content">
+                <div class="toast-icon">${icon}</div>
+                <div class="toast-message">${messageText}</div>
+            </div>
+            <button class="toast-close" aria-label="닫기">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
         </div>
-        <button class="toast-close" aria-label="닫기">
-            <i class="fa-solid fa-xmark"></i>
-        </button>
     `;
 
     // 닫기 버튼 이벤트

@@ -23,6 +23,11 @@
  * @param {string} options.region - Region (기본값: 'us-central1')
  * @param {string} options.projectId - Project ID (Full 모드에서는 Service Account에서 추출)
  * @param {object} options.serviceAccountJson - Service Account JSON 객체 (Full 모드만 필요)
+ * @param {string} options.reasoningEffort - Reasoning effort ('auto', 'min', 'low', 'medium', 'high', 'max')
+ * @param {boolean} options.includeReasoning - Reasoning thoughts 포함 여부
+ * @param {boolean} options.enableWebSearch - 웹 검색 활성화
+ * @param {boolean} options.requestImages - 이미지 요청 활성화
+ * @param {boolean} options.useSysprompt - 시스템 프롬프트 사용
  * @returns {Promise<string>} 응답 텍스트
  */
 async function callVertexAI({
@@ -40,6 +45,12 @@ async function callVertexAI({
     region = 'us-central1',
     projectId = null,
     serviceAccountJson = null,
+    reasoningEffort = 'auto',
+    includeReasoning = false,
+    enableWebSearch = false,
+    requestImages = false,
+    useSysprompt = false,
+    seed = undefined, // seed 파라미터 추가
 }) {
     // 인증 모드에 따른 처리
     let accessToken = null;
@@ -99,6 +110,33 @@ async function callVertexAI({
     if (Array.isArray(stopSequences) && stopSequences.length > 0) {
         generationConfig.stopSequences = stopSequences;
     }
+    
+    // seed 파라미터 추가 (Vertex AI는 seed를 지원함, seed가 정의되어 있고 >= 0일 때만)
+    if (seed !== undefined && seed >= 0) {
+        generationConfig.seed = seed;
+    }
+
+    // Thinking Config 지원 (Gemini 2.5 Flash/Pro)
+    const isThinkingConfigModel = /^gemini-2.5-(flash|pro)/.test(model) && !/-image(-preview)?$/.test(model);
+    if (isThinkingConfigModel && window.tokenOptimization) {
+        const thinkingBudget = window.tokenOptimization.calculateGoogleBudgetTokens(
+            maxTokens,
+            reasoningEffort,
+            model
+        );
+        
+        if (Number.isInteger(thinkingBudget) && thinkingBudget >= 0) {
+            generationConfig.thinkingConfig = {
+                includeThoughts: includeReasoning,
+                thinkingBudget: thinkingBudget > 0 ? thinkingBudget : undefined,
+            };
+            
+            // Vertex AI: thinkingBudget이 0이고 includeThoughts가 true면 false로 변경
+            if (thinkingBudget === 0 && includeReasoning) {
+                generationConfig.thinkingConfig.includeThoughts = false;
+            }
+        }
+    }
 
     const requestBody = {
         contents: contents,
@@ -106,8 +144,46 @@ async function callVertexAI({
         safetySettings: GEMINI_SAFETY, // 세이프티 완전 비활성화
     };
 
-    // 시스템 인스트럭션 추가
-    if (systemInstruction) {
+    // 실리태번과 동일: 이미지 생성 모델 및 request_images 처리 (398-401번 라인)
+    const imageGenerationModels = [
+        'gemini-2.0-flash-exp',
+        'gemini-2.0-flash-exp-image-generation',
+        'gemini-2.0-flash-preview-image-generation',
+        'gemini-2.5-flash-image-preview',
+        'gemini-2.5-flash-image',
+    ];
+    const enableImageModality = requestImages && imageGenerationModels.includes(model);
+    if (enableImageModality) {
+        generationConfig.responseModalities = ['text', 'image'];
+    }
+
+    // 실리태번과 동일: use_sysprompt 처리 (403번 라인)
+    // useSysprompt가 true이고 이미지 생성 모드가 아니면 systemInstruction 사용
+    const useSystemPrompt = !enableImageModality && useSysprompt;
+    
+    // 실리태번과 동일: tools 배열 추가 (409-427번 라인)
+    const tools = [];
+    const isGemma = model.includes('gemma');
+    const isLearnLM = model.includes('learnlm');
+    const noSearchModels = [
+        'gemini-2.0-flash-lite',
+        'gemini-2.0-flash-lite-001',
+        'gemini-2.0-flash-lite-preview-02-05',
+        'gemini-robotics-er-1.5-preview',
+    ];
+    
+    // 웹 검색 활성화 (409-410번 라인)
+    if (enableWebSearch && !enableImageModality && !isGemma && !isLearnLM && !noSearchModels.includes(model)) {
+        tools.push({ google_search: {} });
+    }
+    
+    // tools가 있으면 requestBody에 추가
+    if (tools.length > 0) {
+        requestBody.tools = tools;
+    }
+
+    // 시스템 인스트럭션 추가 (useSystemPrompt가 true일 때만)
+    if (useSystemPrompt && systemInstruction) {
         if (typeof systemInstruction === 'string') {
             requestBody.systemInstruction = {
                 parts: [{ text: systemInstruction }],
@@ -115,6 +191,9 @@ async function callVertexAI({
         } else {
             requestBody.systemInstruction = systemInstruction;
         }
+    } else if (!useSystemPrompt && systemInstruction) {
+        // useSystemPrompt가 false면 시스템 메시지를 contents에 포함 (실리태번과 동일)
+        // convertMessagesToGeminiFormat에서 이미 처리될 수 있지만, 여기서 확인
     }
 
     const responseType = stream ? 'streamGenerateContent' : 'generateContent';

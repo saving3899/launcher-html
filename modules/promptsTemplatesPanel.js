@@ -2200,48 +2200,58 @@ async function setupPromptsPanelEvents(panelContainer) {
     const lastSelectedPreset = settings.preset_settings_openai;
     let shouldLoadPreset = false;
     let presetToLoad = null;
+    let presetAlreadyLoaded = false; // 프리셋이 이미 로드되었는지 추적
     
     // 프리셋이 선택되어 있고 Default가 아니면 프리셋 로드
     // PresetManager를 먼저 생성해야 getCompletionPresetByName을 호출할 수 있음
     let presetSelect = panelContainer.querySelector('#settings_preset_openai');
     if (presetSelect && lastSelectedPreset && lastSelectedPreset !== 'Default' && lastSelectedPreset !== 'gui') {
-        // PresetManager 등록 (임시로 생성, 나중에 다시 사용)
-        const tempManager = registerPresetManager(presetSelect, 'openai');
-        const { preset_names } = await tempManager.getPresetList();
-        const presetIndex = preset_names[lastSelectedPreset];
-        
-        if (presetIndex !== undefined) {
-            // 프리셋 데이터 가져오기
-            const preset = await tempManager.getCompletionPresetByName(lastSelectedPreset);
-            if (preset) {
-                presetToLoad = preset;
-                shouldLoadPreset = true;
+        try {
+            // PresetManager 등록 (임시로 생성, 나중에 다시 사용)
+            const tempManager = registerPresetManager(presetSelect, 'openai');
+            const { preset_names } = await tempManager.getPresetList();
+            const presetIndex = preset_names[lastSelectedPreset];
+            
+            if (presetIndex !== undefined) {
+                // 프리셋 데이터 가져오기
+                const preset = await tempManager.getCompletionPresetByName(lastSelectedPreset);
+                if (preset) {
+                    presetToLoad = preset;
+                    shouldLoadPreset = true;
+                }
             }
+        } catch (error) {
+            console.warn('프리셋 로드 실패:', error);
         }
     }
     
     // 설정 로드
     // 프리셋이 있으면 프리셋 설정을 먼저 적용하고, 없으면 일반 설정 로드
     if (shouldLoadPreset && presetToLoad) {
-        // 프리셋 설정을 SettingsStorage에 먼저 적용 (프롬프트 포함)
-        const currentSettings = await SettingsStorage.load();
-        const { prompts: presetPrompts, prompt_order: presetPromptOrder, ...presetSettingsWithoutPrompts } = presetToLoad;
-        
-        const mergedForLoad = {
-            ...currentSettings,
-            ...presetSettingsWithoutPrompts,
-            preset_settings_openai: presetToLoad.name || 'Default',
-        };
-        
-        // 프롬프트도 포함
-        if (presetPrompts !== undefined && Array.isArray(presetPrompts) && presetPrompts.length > 0) {
-            mergedForLoad.prompts = presetPrompts;
+        try {
+            // 프리셋 설정을 SettingsStorage에 먼저 적용 (프롬프트 포함)
+            const currentSettings = await SettingsStorage.load();
+            const { prompts: presetPrompts, prompt_order: presetPromptOrder, ...presetSettingsWithoutPrompts } = presetToLoad;
+            
+            const mergedForLoad = {
+                ...currentSettings,
+                ...presetSettingsWithoutPrompts,
+                preset_settings_openai: presetToLoad.name || 'Default',
+            };
+            
+            // 프롬프트도 포함
+            if (presetPrompts !== undefined && Array.isArray(presetPrompts) && presetPrompts.length > 0) {
+                mergedForLoad.prompts = presetPrompts;
+            }
+            if (presetPromptOrder !== undefined && Array.isArray(presetPromptOrder) && presetPromptOrder.length > 0) {
+                mergedForLoad.prompt_order = presetPromptOrder;
+            }
+            
+            await SettingsStorage.save(mergedForLoad);
+            presetAlreadyLoaded = true; // 프리셋 적용 완료
+        } catch (error) {
+            console.warn('프리셋 설정 저장 실패:', error);
         }
-        if (presetPromptOrder !== undefined && Array.isArray(presetPromptOrder) && presetPromptOrder.length > 0) {
-            mergedForLoad.prompt_order = presetPromptOrder;
-        }
-        
-        await SettingsStorage.save(mergedForLoad);
     }
     
     await loadGenerationSettings(panelContainer);
@@ -2272,8 +2282,14 @@ async function setupPromptsPanelEvents(panelContainer) {
             await applyPresetToUI(panelContainer, preset);
             
             // PromptManager 업데이트 (프리셋 변경 시 항상 SettingsStorage에서 최신 데이터 로드)
+            // PromptManager가 초기화된 후에만 업데이트 (없으면 조용히 넘어감)
             if (window.promptManagerInstance) {
                 const promptManager = window.promptManagerInstance;
+                
+                // PromptManager가 아직 초기화되지 않았으면 건너뛰기
+                if (!promptManager.configuration || !promptManager.serviceSettings) {
+                    return;
+                }
                 
                 // SettingsStorage에서 최신 설정 로드 (프리셋이 저장된 후)
                 const settings = await SettingsStorage.load();
@@ -2373,56 +2389,62 @@ async function setupPromptsPanelEvents(panelContainer) {
                 }
                 
                 // Quick Edit 필드에 새로운 프롬프트 내용 로드 (프리셋 변경 후)
-                const mainPrompt = promptManager.getPromptById('main');
-                const nsfwPrompt = promptManager.getPromptById('nsfw');
-                const jailbreakPrompt = promptManager.getPromptById('jailbreak');
-                
-                const mainQuickEdit = panelContainer.querySelector('#main_prompt_quick_edit_textarea');
-                const nsfwQuickEdit = panelContainer.querySelector('#nsfw_prompt_quick_edit_textarea');
-                const jailbreakQuickEdit = panelContainer.querySelector('#jailbreak_prompt_quick_edit_textarea');
-                
-                if (mainQuickEdit && mainPrompt) {
-                    mainQuickEdit.value = mainPrompt.content || '';
-                }
-                if (nsfwQuickEdit && nsfwPrompt) {
-                    nsfwQuickEdit.value = nsfwPrompt.content || '';
-                }
-                if (jailbreakQuickEdit && jailbreakPrompt) {
-                    jailbreakQuickEdit.value = jailbreakPrompt.content || '';
-                }
-            } else {
-                // 오류 코드 토스트 알림 표시
-                if (typeof showErrorCodeToast === 'function') {
-                    showErrorCodeToast('ERR_PROMPT_8006', 'PromptManager 인스턴스를 찾을 수 없음');
+                // PromptManager가 초기화된 후에만 접근
+                if (window.promptManagerInstance) {
+                    const promptManager = window.promptManagerInstance;
+                    const mainPrompt = promptManager.getPromptById('main');
+                    const nsfwPrompt = promptManager.getPromptById('nsfw');
+                    const jailbreakPrompt = promptManager.getPromptById('jailbreak');
+                    
+                    const mainQuickEdit = panelContainer.querySelector('#main_prompt_quick_edit_textarea');
+                    const nsfwQuickEdit = panelContainer.querySelector('#nsfw_prompt_quick_edit_textarea');
+                    const jailbreakQuickEdit = panelContainer.querySelector('#jailbreak_prompt_quick_edit_textarea');
+                    
+                    if (mainQuickEdit && mainPrompt) {
+                        mainQuickEdit.value = mainPrompt.content || '';
+                    }
+                    if (nsfwQuickEdit && nsfwPrompt) {
+                        nsfwQuickEdit.value = nsfwPrompt.content || '';
+                    }
+                    if (jailbreakQuickEdit && jailbreakPrompt) {
+                        jailbreakQuickEdit.value = jailbreakPrompt.content || '';
+                    }
                 }
             }
+            // PromptManager가 없으면 조용히 넘어감 (초기화되지 않은 상태에서 프리셋 변경 시)
         };
         
         // 프리셋 목록 채우기 (populatePresetSelect 내부에서 마지막 선택된 프리셋 복원)
         await manager.populatePresetSelect();
         
         // 마지막에 선택한 preset 복원 (populatePresetSelect는 셀렉트 값만 설정하므로 실제 프리셋 적용 필요)
+        // 단, 이미 위에서 프리셋을 적용했다면(presetAlreadyLoaded) 다시 적용하지 않음
         const settingsForRestore = await SettingsStorage.load();
         const lastSelectedPresetForRestore = settingsForRestore.preset_settings_openai;
         
         if (lastSelectedPresetForRestore && lastSelectedPresetForRestore !== 'Default' && lastSelectedPresetForRestore !== 'gui') {
-            // preset 이름으로 찾기
-            const { preset_names } = await manager.getPresetList();
-            const presetIndex = preset_names[lastSelectedPresetForRestore];
-            
-            // 셀렉트에 올바른 값이 설정되어 있는지 확인
-            const currentSelectName = manager.getSelectedPresetName();
-            if (presetIndex !== undefined) {
-                // 셀렉트 값이 올바르지 않으면 설정
-                if (currentSelectName !== lastSelectedPresetForRestore && manager.select) {
-                    manager.select.value = String(presetIndex);
-                }
+            try {
+                // preset 이름으로 찾기
+                const { preset_names } = await manager.getPresetList();
+                const presetIndex = preset_names[lastSelectedPresetForRestore];
                 
-                // 이미 위에서 프리셋을 적용하지 않았으면 selectPreset 호출 (applyPresetSettings 포함)
-                // shouldLoadPreset이 true여도 셀렉트가 변경되었을 수 있으므로 다시 확인
-                if (!shouldLoadPreset) {
-                    await manager.selectPreset(presetIndex);
+                // 셀렉트에 올바른 값이 설정되어 있는지 확인
+                const currentSelectName = manager.getSelectedPresetName();
+                if (presetIndex !== undefined) {
+                    // 셀렉트 값이 올바르지 않으면 설정 (UI만 업데이트)
+                    if (currentSelectName !== lastSelectedPresetForRestore && manager.select) {
+                        manager.select.value = String(presetIndex);
+                    }
+                    
+                    // 이미 위에서 프리셋을 적용하지 않았을 때만 selectPreset 호출 (applyPresetSettings 포함)
+                    // presetAlreadyLoaded가 false일 때만 적용 (이미 적용했다면 중복 방지)
+                    if (!presetAlreadyLoaded) {
+                        await manager.selectPreset(presetIndex);
+                    }
                 }
+            } catch (error) {
+                // 에러 발생 시 로그만 남기고 계속 진행 (기본 프리셋 사용)
+                console.warn('프리셋 복원 실패:', error);
             }
         }
 
@@ -2562,17 +2584,22 @@ async function setupPromptsPanelEvents(panelContainer) {
             const currentPresetName = settings.preset_settings_openai;
             if (currentPresetName && currentPresetName !== 'Default' && currentPresetName !== 'gui') {
                 try {
-                    const { presets } = await manager.getPresetList();
-                    const { preset_names } = await manager.getPresetList();
-                    const presetIndex = preset_names[currentPresetName];
-                    if (presetIndex !== undefined && presets[presetIndex]) {
-                        const currentPreset = presets[presetIndex];
-                        // 프리셋에 prompts/prompt_order가 있으면 사용
-                        if (currentPreset.prompts !== undefined && Array.isArray(currentPreset.prompts) && currentPreset.prompts.length > 0) {
-                            prompts = currentPreset.prompts;
-                        }
-                        if (currentPreset.prompt_order !== undefined && Array.isArray(currentPreset.prompt_order) && currentPreset.prompt_order.length > 0) {
-                            prompt_order = currentPreset.prompt_order;
+                    // PresetManager를 찾거나 생성
+                    const presetSelect = panelContainer.querySelector('#settings_preset_openai');
+                    if (presetSelect) {
+                        // registerPresetManager - 전역 스코프에서 사용
+                        const manager = registerPresetManager(presetSelect, 'openai');
+                        const { presets, preset_names } = await manager.getPresetList();
+                        const presetIndex = preset_names[currentPresetName];
+                        if (presetIndex !== undefined && presets[presetIndex]) {
+                            const currentPreset = presets[presetIndex];
+                            // 프리셋에 prompts/prompt_order가 있으면 사용
+                            if (currentPreset.prompts !== undefined && Array.isArray(currentPreset.prompts) && currentPreset.prompts.length > 0) {
+                                prompts = currentPreset.prompts;
+                            }
+                            if (currentPreset.prompt_order !== undefined && Array.isArray(currentPreset.prompt_order) && currentPreset.prompt_order.length > 0) {
+                                prompt_order = currentPreset.prompt_order;
+                            }
                         }
                     }
                 } catch (error) {
@@ -3001,12 +3028,52 @@ async function setupPromptsPanelEvents(panelContainer) {
         jailbreakQuickEdit.addEventListener('blur', handleQuickEditSave);
     }
     
-    // 복원 버튼 이벤트 (나중에 구현)
+    // 복원 버튼 이벤트 구현
     const restoreButtons = panelContainer.querySelectorAll('[id$="_restore"]');
     restoreButtons.forEach(button => {
         button.addEventListener('click', async () => {
-            // 기본값 복원 로직 (나중에 구현)
-            console.log('Restore button clicked:', button.id);
+            const buttonId = button.id;
+            let defaultValue = '';
+            let targetTextareaId = '';
+            
+            // 버튼 ID에 따라 기본값과 대상 textarea 결정 (presetManager.js의 기본값 사용)
+            if (buttonId === 'impersonation_prompt_restore') {
+                defaultValue = '[Write your next reply from the point of view of {{user}}, using the chat history so far as a guideline for the writing style of {{user}}. Don\'t write as {{char}} or system. Don\'t describe actions of {{char}}.]';
+                targetTextareaId = 'impersonation_prompt_textarea';
+            } else if (buttonId === 'wi_format_restore') {
+                defaultValue = '{0}';
+                targetTextareaId = 'wi_format_textarea';
+            } else if (buttonId === 'scenario_format_restore') {
+                defaultValue = '{{scenario}}';
+                targetTextareaId = 'scenario_format_textarea';
+            } else if (buttonId === 'personality_format_restore') {
+                defaultValue = '{{personality}}';
+                targetTextareaId = 'personality_format_textarea';
+            } else if (buttonId === 'group_nudge_prompt_restore') {
+                defaultValue = '[Write the next reply only as {{char}}.]';
+                targetTextareaId = 'group_nudge_prompt_textarea';
+            } else if (buttonId === 'newchat_prompt_restore') {
+                defaultValue = '[Start a new Chat]';
+                targetTextareaId = 'newchat_prompt_textarea';
+            } else if (buttonId === 'newgroupchat_prompt_restore') {
+                defaultValue = '[Start a new group chat. Group members: {{group}}]';
+                targetTextareaId = 'newgroupchat_prompt_textarea';
+            } else if (buttonId === 'newexamplechat_prompt_restore') {
+                defaultValue = '[Example Chat]';
+                targetTextareaId = 'newexamplechat_prompt_textarea';
+            } else if (buttonId === 'continue_nudge_prompt_restore') {
+                defaultValue = '[Continue your last message without repeating its original content.]';
+                targetTextareaId = 'continue_nudge_prompt_textarea';
+            }
+            
+            if (targetTextareaId) {
+                const textarea = panelContainer.querySelector(`#${targetTextareaId}`);
+                if (textarea) {
+                    textarea.value = defaultValue;
+                    // 설정 저장
+                    await saveGenerationSettings(panelContainer);
+                }
+            }
         });
     });
 }

@@ -249,6 +249,20 @@ async function sendAIMessageForAutofill(userMessage, chatManager) {
                 persona_description: settings.persona_description || '',
                 persona_description_position: settings.persona_description_position ?? 0,
                 squash_system_messages: settings.squash_system_messages !== false,
+                // Wrap in Quotes 설정 (대필에서는 일반적으로 사용하지 않지만 일관성을 위해 추가)
+                wrap_in_quotes: settings.wrap_in_quotes || false,
+                // Continue Prefill 설정 (대필에서는 사용하지 않음)
+                continue_prefill: false,
+                // Utility Prompts (대필에서도 필요할 수 있음)
+                new_chat_prompt: settings.new_chat_prompt || '',
+                new_group_chat_prompt: settings.new_group_chat_prompt || '',
+                new_example_chat_prompt: settings.new_example_chat_prompt || '[Example Chat]',
+                continue_nudge_prompt: settings.continue_nudge_prompt || '',
+                wi_format: settings.wi_format || '{0}',
+                scenario_format: settings.scenario_format || '{{scenario}}',
+                personality_format: settings.personality_format || '{{personality}}',
+                group_nudge_prompt: settings.group_nudge_prompt || '',
+                impersonation_prompt: settings.impersonation_prompt || '',
             },
             tokenCountFn, // 실제 토큰 계산 함수 전달
             'normal' // generateType
@@ -318,6 +332,43 @@ async function sendAIMessageForAutofill(userMessage, chatManager) {
         stop: [],
         signal: chatManager.abortController?.signal,
     };
+    
+    // seed 파라미터 추가 (seed >= 0일 때만 전달, -1이면 무작위 시드이므로 전달하지 않음)
+    if (settings.seed !== undefined && settings.seed >= 0) {
+        apiOptions.seed = settings.seed;
+    }
+    
+    // 토큰 최적화 옵션 추가 (설정에서 읽기)
+    const tokenOptimizationSettings = settings.tokenOptimization || {};
+    
+    // reasoning_effort는 settings에서 직접 읽기 (프롬프트 패널에서 설정)
+    const reasoningEffort = settings.reasoning_effort || settings.openai_reasoning_effort || tokenOptimizationSettings.reasoningEffort;
+    
+    // Claude/Anthropic 및 OpenRouter용 캐싱 옵션
+    if (apiProvider === 'claude' || apiProvider === 'anthropic' || apiProvider === 'openrouter') {
+        if (typeof tokenOptimizationSettings.cachingAtDepth === 'number') {
+            apiOptions.cachingAtDepth = tokenOptimizationSettings.cachingAtDepth;
+        }
+        if (typeof tokenOptimizationSettings.enableSystemPromptCache === 'boolean') {
+            apiOptions.enableSystemPromptCache = tokenOptimizationSettings.enableSystemPromptCache;
+        }
+        if (typeof tokenOptimizationSettings.extendedTTL === 'boolean') {
+            apiOptions.extendedTTL = tokenOptimizationSettings.extendedTTL;
+        }
+        if (reasoningEffort) {
+            apiOptions.reasoningEffort = reasoningEffort;
+        }
+    }
+    
+    // Gemini/Vertex AI용 reasoning 옵션
+    if (apiProvider === 'makersuite' || apiProvider === 'gemini' || apiProvider === 'vertexai') {
+        if (reasoningEffort) {
+            apiOptions.reasoningEffort = reasoningEffort;
+        }
+        if (typeof tokenOptimizationSettings.includeReasoning === 'boolean') {
+            apiOptions.includeReasoning = tokenOptimizationSettings.includeReasoning;
+        }
+    }
 
     // Vertex AI 특수 옵션
     if (apiProvider === 'vertexai') {

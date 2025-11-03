@@ -260,7 +260,57 @@ async function prepareOpenAIMessages({
         }
     }
 
-    const chat = chatCompletion.getChat();
+    let chat = chatCompletion.getChat();
+    
+    // 실리태번과 동일: names_behavior 적용 (517-534번 라인)
+    // 캐릭터 이름 동작 설정 확인
+    const namesBehavior = oaiSettings.names_behavior !== undefined 
+        ? oaiSettings.names_behavior 
+        : ((userSettings && userSettings.names_behavior !== undefined) ? userSettings.names_behavior : 0); // 기본값: 0 (Default)
+    
+    // names_behavior 값 정의 (실리태번과 동일)
+    const NONE = -1;
+    const DEFAULT = 0;
+    const COMPLETION = 1;
+    const CONTENT = 2;
+    
+    // CONTENT 모드: 모든 메시지 content 앞에 이름 추가
+    if (namesBehavior === CONTENT) {
+        chat = chat.map(message => {
+            if (message.name && message.content && typeof message.content === 'string' && message.role !== 'system') {
+                // 이름이 이미 content 앞에 있는지 확인
+                const namePrefix = `${message.name}: `;
+                if (!message.content.startsWith(namePrefix)) {
+                    return {
+                        ...message,
+                        content: `${namePrefix}${message.content}`
+                    };
+                }
+            }
+            return message;
+        });
+    }
+    // DEFAULT 모드는 populateChatHistory에서 처리 (그룹 채팅이나 force_avatar인 경우)
+    // COMPLETION 모드는 name 필드로 처리 (이미 Message.name으로 전달됨)
+    // NONE 모드는 아무 처리 안 함
+    
+    // 실리태번과 동일: wrap_in_quotes 옵션 적용 (540번 라인)
+    // 사용자 메시지에 따옴표 추가
+    const wrapInQuotes = oaiSettings.wrap_in_quotes !== undefined 
+        ? oaiSettings.wrap_in_quotes 
+        : ((userSettings && userSettings.wrap_in_quotes) || false);
+    
+    if (wrapInQuotes) {
+        chat = chat.map(message => {
+            if (message.role === 'user' && message.content && typeof message.content === 'string') {
+                return {
+                    ...message,
+                    content: `"${message.content}"`
+                };
+            }
+            return message;
+        });
+    }
     
     // 실리태번과 동일: tokenHandler.counts 반환 (1446번 라인)
     const counts = promptManager.tokenHandler ? promptManager.tokenHandler.counts : null;

@@ -111,11 +111,17 @@
             <div class="char-info" id="char-info" style="display: none;">
                 <span id="char-name" class="char-name-text">캐릭터를 선택하세요</span>
                 <div class="char-info-buttons">
+                    <button class="char-info-btn" id="char-info-new-chat" title="새 채팅">
+                        <i class="fa-solid fa-plus-circle"></i>
+                    </button>
                     <button class="char-info-btn" id="char-info-chat-list" title="채팅 목록">
                         <i class="fa-solid fa-comments"></i>
                     </button>
                     <button class="char-info-btn" id="char-info-profile" title="캐릭터 프로필">
                         <i class="fa-solid fa-user"></i>
+                    </button>
+                    <button class="char-info-btn" id="char-info-manage" title="캐릭터 관리">
+                        <i class="fa-solid fa-users"></i>
                     </button>
                 </div>
             </div>
@@ -967,6 +973,8 @@
     <script src="utils/fileParser.js"></script>
     <script src="utils/pngEncoder.js"></script>
     <script src="utils/export.js"></script>
+    <!-- 토큰 최적화 유틸리티 (API 호출 전에 로드) -->
+    <script src="utils/tokenOptimization.js"></script>
     <script src="utils/import.js"></script>
     <script src="utils/regexImportExport.js"></script>
     <script src="utils/aiLoadingPresetImportExport.js"></script>

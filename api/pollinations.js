@@ -20,6 +20,7 @@ async function callPollinations({
     stream = false,
     signal = null,
     onChunk = null,
+    seed = undefined, // seed 파라미터 추가
 }) {
     const filteredMessages = messages.filter(msg => msg && typeof msg === 'object');
 
@@ -30,7 +31,8 @@ async function callPollinations({
         stream: stream,
         private: true,
         referrer: 'sillytavern',
-        seed: Math.floor(Math.random() * 99999999),
+        // seed: seed 파라미터가 있으면 사용, 없으면 기존 랜덤 seed 사용
+        seed: seed !== undefined && seed >= 0 ? seed : Math.floor(Math.random() * 99999999),
     };
 
     // Pollinations는 max_tokens를 지원하지 않음

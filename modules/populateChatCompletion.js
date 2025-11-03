@@ -86,7 +86,14 @@ async function populateChatCompletion(
     // 중요: populateChatHistory를 먼저 호출하여 채팅 히스토리가 비어있을 때 atDepth 엔트리를 worldInfoBefore에 추가
     // (worldInfoBefore를 chatCompletion에 추가하기 전에 내용을 미리 수정해야 함)
     const chatHistoryMessages = Array.isArray(messages) ? messages : (messages === undefined || messages === null ? [] : []);
-    await populateChatHistory(chatHistoryMessages, prompts, chatCompletion, type, cyclePrompt, promptManager, tokenCountFn, oaiSettings, excludeStatusBarChoice);
+    // names_behavior 설정 확인
+    const namesBehavior = oaiSettings.names_behavior !== undefined 
+        ? oaiSettings.names_behavior 
+        : ((promptManager && promptManager.serviceSettings && promptManager.serviceSettings.names_behavior !== undefined) 
+            ? promptManager.serviceSettings.names_behavior 
+            : 0); // 기본값: 0 (Default)
+    
+    await populateChatHistory(chatHistoryMessages, prompts, chatCompletion, type, cyclePrompt, promptManager, tokenCountFn, oaiSettings, excludeStatusBarChoice, namesBehavior);
     
     // 실리태번과 동일: Character and world information을 하드코딩된 순서로 먼저 추가 (1022-1029번 라인)
     await addToChatCompletionBound('worldInfoBefore');
@@ -119,6 +126,62 @@ async function populateChatCompletion(
         //     await quietPromptMessage.addImage(quietImage);
         // }
         controlPrompts.add(quietPromptMessage);
+    }
+
+    // 실리태번과 동일: Continue prefill 처리 (1141-1154번 라인)
+    // Displace the message to be continued from its original position before performing in-chat injections
+    // In case if it is an assistant message, we want to prepend the users assistant prefill on the message
+    const continuePrefill = oaiSettings.continue_prefill !== undefined 
+        ? oaiSettings.continue_prefill 
+        : false;
+    
+    if (type === 'continue' && continuePrefill && messages && messages.length > 0) {
+        // messages 배열의 첫 번째 메시지 (마지막 메시지)를 가져옴
+        const chatMessage = messages[0];
+        const isAssistantRole = chatMessage.role === 'assistant';
+        
+        // TODO: assistant_prefill 설정 지원 필요 (현재는 빈 문자열)
+        const assistantPrefill = ''; // isAssistantRole ? substituteParams(oaiSettings.assistant_prefill) : '';
+        const messageContent = [assistantPrefill, chatMessage.content].filter(x => x).join('\n\n');
+        
+        // Message.createAsync - 전역 스코프에서 사용
+        const continueMessage = await Message.createAsync(chatMessage.role, messageContent, 'continuePrefill', tokenCountFn);
+        
+        // TODO: names_behavior === COMPLETION일 때만 이름 설정 필요
+        // if (chatMessage.name && namesInCompletion) {
+        //     await continueMessage.setName(promptManager.sanitizeName(chatMessage.name));
+        // }
+        
+        controlPrompts.add(continueMessage);
+        chatCompletion.reserveBudget(continueMessage);
+        
+        // messages 배열에서 첫 번째 메시지 제거 (populateChatHistory에서 다시 추가되지 않도록)
+        messages.shift();
+    }
+
+    // continue_nudge_prompt 처리 (기존 continue 로직 이후, quietPrompt 전에 추가)
+    // 기존 continue 기능과 공존하면서 보조적으로 작동
+    if (type === 'continue') {
+        const continueNudge = oaiSettings.continue_nudge_prompt || '';
+        if (continueNudge) {
+            // configuration에서 name1, name2 가져오기 ({{user}}, {{char}} 치환용)
+            const name1 = promptManager.configuration?.name1 || '';
+            const name2 = promptManager.configuration?.name2 || '';
+            // substituteParams - 전역 스코프에서 사용
+            const continueNudgeContent = substituteParams(continueNudge, name1, name2);
+            if (continueNudgeContent && continueNudgeContent.trim()) {
+                const continueNudgeMessage = await Message.createAsync(
+                    'system',
+                    continueNudgeContent.trim(),
+                    'continueNudge',
+                    tokenCountFn
+                );
+                // continuePrefill 다음에 추가 (기존 로직 이후)
+                // quietPrompt 전에 추가 (quietPrompt는 항상 마지막이어야 함)
+                controlPrompts.add(continueNudgeMessage);
+                chatCompletion.reserveBudget(continueNudgeMessage);
+            }
+        }
     }
 
     chatCompletion.reserveBudget(controlPrompts);
@@ -175,7 +238,7 @@ async function populateChatCompletion(
 
     // TODO: Vectors Memory, Vectors Data Bank, Smart Context 등의 확장 프롬프트 처리
     // TODO: Tool calling 지원
-    // TODO: Continue 모드 처리
+    // Continue 모드 처리: 위에서 이미 처리됨 (controlPrompts에 continuePrefill 메시지 추가)
     
     // 상태창/선택지 Extension Module 엔트리 수집 (EMTop/EMBottom)
     // 대필 요청 시에는 제외
@@ -191,7 +254,7 @@ async function populateChatCompletion(
     // Dialogue examples 처리 (실리태번과 동일)
     // pin_examples 설정이 없으므로 기본적으로 chat history 전에 추가
     if (messageExamples && Array.isArray(messageExamples) && messageExamples.length > 0) {
-        await populateDialogueExamples(prompts, chatCompletion, messageExamples, promptManager, tokenCountFn, emTopEntries, emBottomEntries);
+        await populateDialogueExamples(prompts, chatCompletion, messageExamples, promptManager, tokenCountFn, emTopEntries, emBottomEntries, oaiSettings);
     } else if ((emTopEntries.length > 0 || emBottomEntries.length > 0) && !excludeStatusBarChoice) {
         // messageExamples가 없어도 EMTop/EMBottom 엔트리가 있으면 dialogueExamples 컬렉션 생성 후 추가
         if (!prompts.has('dialogueExamples')) {
@@ -200,7 +263,7 @@ async function populateChatCompletion(
             const dialogueExamplesPrompt = new Prompt('dialogueExamples', '', 'system');
             prompts.set('dialogueExamples', dialogueExamplesPrompt);
         }
-        await populateDialogueExamples(prompts, chatCompletion, [], promptManager, tokenCountFn, emTopEntries, emBottomEntries);
+        await populateDialogueExamples(prompts, chatCompletion, [], promptManager, tokenCountFn, emTopEntries, emBottomEntries, oaiSettings);
     }
     
     // Chat history 처리 (실제 메시지 추가)
@@ -227,8 +290,9 @@ async function populateChatCompletion(
  * @param {Function} [tokenCountFn] - Optional token counting function
  * @param {Array} [emTopEntries] - Extension Module 상단 엔트리들 (상태창/선택지)
  * @param {Array} [emBottomEntries] - Extension Module 하단 엔트리들 (상태창/선택지)
+ * @param {Object} [oaiSettings] - OpenAI 설정 객체 (new_example_chat_prompt 포함)
  */
-async function populateDialogueExamples(prompts, chatCompletion, messageExamples, promptManager, tokenCountFn = null, emTopEntries = [], emBottomEntries = []) {
+async function populateDialogueExamples(prompts, chatCompletion, messageExamples, promptManager, tokenCountFn = null, emTopEntries = [], emBottomEntries = [], oaiSettings = {}) {
     if (!prompts.has('dialogueExamples')) {
         return;
     }
@@ -262,8 +326,8 @@ async function populateDialogueExamples(prompts, chatCompletion, messageExamples
     }
     
     if (Array.isArray(messageExamples) && messageExamples.length > 0) {
-        // new_example_chat_prompt는 실리태번 설정에서 가져오지만, 여기서는 기본값 사용
-        const newExampleChatPrompt = '{Example Dialogue:}';
+        // new_example_chat_prompt는 oaiSettings에서 가져오고, 없으면 기본값 사용
+        const newExampleChatPrompt = oaiSettings.new_example_chat_prompt || '{Example Dialogue:}';
         const newExampleChat = await Message.createAsync('system', substituteParams(newExampleChatPrompt), 'newChat');
         
         for (const dialogue of [...messageExamples]) {
@@ -329,7 +393,7 @@ async function populateDialogueExamples(prompts, chatCompletion, messageExamples
  * @param {PromptManager} promptManager - PromptManager 인스턴스
  * @param {Function} [tokenCountFn] - Optional token counting function
  */
-async function populateChatHistory(messages, prompts, chatCompletion, type = null, cyclePrompt = null, promptManager, tokenCountFn = null, oaiSettings = {}, excludeStatusBarChoice = false) {
+async function populateChatHistory(messages, prompts, chatCompletion, type = null, cyclePrompt = null, promptManager, tokenCountFn = null, oaiSettings = {}, excludeStatusBarChoice = false, namesBehavior = 0) {
     const messagesArray = Array.isArray(messages) ? messages : [];
     
     // 실리태번과 동일 (786번 라인)
@@ -550,7 +614,18 @@ async function populateChatHistory(messages, prompts, chatCompletion, type = nul
         );
 
         // 실리태번과 동일: 이름 설정 (850-853번 라인, names_behavior === COMPLETION일 때만)
-        // TODO: names_behavior 설정 지원 필요
+        // COMPLETION 모드: Message.name 필드로 전달
+        const COMPLETION = 1;
+        if (namesBehavior === COMPLETION && chatPrompt.name && promptManager && promptManager.sanitizeName) {
+            // 실리태번과 동일: sanitizeName 함수 사용
+            const sanitizedName = promptManager.sanitizeName(chatPrompt.name);
+            if (sanitizedName) {
+                await chatMessage.setName(sanitizedName, tokenCountFn);
+            }
+        }
+        // DEFAULT 모드는 그룹 채팅이나 force_avatar인 경우에만 content 앞에 이름 추가 (현재는 그룹 채팅 미구현)
+        // CONTENT 모드는 prepareOpenAIMessages에서 처리
+        // NONE 모드는 아무 처리 안 함
 
         // 실리태번과 동일: 토큰 예산 확인 후 추가 (881-885번 라인)
         // 중요: insertAtEnd()를 사용하여 메시지 순서 유지

@@ -9,6 +9,7 @@ const XAI_API_BASE_URL = 'https://api.x.ai/v1';
 /**
  * xAI API 호출
  * xAI는 OpenAI 호환이지만 메시지 변환이 필요할 수 있음
+ * @param {boolean} options.enableWebSearch - 웹 검색 활성화
  */
 async function callXAI({
     apiKey,
@@ -20,6 +21,7 @@ async function callXAI({
     stream = false,
     signal = null,
     onChunk = null,
+    enableWebSearch = false,
 }) {
     if (!apiKey) {
         throw new Error('xAI API 키가 필요합니다.');
@@ -48,6 +50,18 @@ async function callXAI({
         // penalty는 추가하지 않음
     } else {
         // 다른 모델들은 기본 파라미터 사용
+    }
+
+    // 실리태번과 동일: 웹 검색 활성화 (1005-1014번 라인)
+    if (enableWebSearch) {
+        requestBody.search_parameters = {
+            mode: 'on',
+            sources: [
+                { type: 'web', safe_search: false },
+                { type: 'news', safe_search: false },
+                { type: 'x' },
+            ],
+        };
     }
 
     const url = `${XAI_API_BASE_URL}/chat/completions`;

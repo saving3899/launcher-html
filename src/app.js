@@ -28,8 +28,10 @@ class MobileChatApp {
             charName: document.getElementById('char-name'),
             charInfo: document.getElementById('char-info'),
             homeInfo: document.getElementById('home-info'),
+            charInfoNewChat: document.getElementById('char-info-new-chat'),
             charInfoChatList: document.getElementById('char-info-chat-list'),
             charInfoProfile: document.getElementById('char-info-profile'),
+            charInfoManage: document.getElementById('char-info-manage'),
             quickReplyContainer: document.getElementById('quick-reply-container'),
             plusBtn: document.getElementById('plus-btn'),
             plusMenu: document.getElementById('plus-menu'),
@@ -67,6 +69,38 @@ class MobileChatApp {
         }
 
         // char-info 버튼 클릭 이벤트
+        // 새 채팅 버튼
+        if (this.elements.charInfoNewChat) {
+            this.elements.charInfoNewChat.addEventListener('click', async () => {
+                const currentCharId = await this.characterManager.getCurrentCharacterId();
+                if (!currentCharId || typeof currentCharId !== 'string' || currentCharId.trim() === '') {
+                    showToast('먼저 캐릭터를 선택해주세요.', 'warning');
+                    return;
+                }
+                
+                // 실제 캐릭터 존재 여부 확인
+                const character = await CharacterStorage.load(currentCharId);
+                if (!character) {
+                    showToast('캐릭터를 찾을 수 없습니다. 먼저 캐릭터를 선택해주세요.', 'error');
+                    return;
+                }
+                
+                // 새 채팅 생성 전에 현재 채팅 저장 (덮어쓰기 방지)
+                if (this.chatManager.currentChatId && this.chatManager.elements?.chatMessages?.children?.length > 0) {
+                    try {
+                        await this.chatManager.saveChat();
+                    } catch (error) {
+                        // 오류 코드 토스트 알림 표시
+                        if (typeof showErrorCodeToast === 'function') {
+                            showErrorCodeToast('ERR_INIT_1002', '새 채팅 생성 전 채팅 저장 중 오류가 발생했습니다', error);
+                        }
+                    }
+                }
+                
+                await this.chatManager.createNewChat(currentCharId);
+            });
+        }
+
         // 채팅 목록 버튼
         if (this.elements.charInfoChatList) {
             this.elements.charInfoChatList.addEventListener('click', () => {
@@ -83,6 +117,13 @@ class MobileChatApp {
                     return;
                 }
                 await this.characterManager.openCharacterProfile(currentCharId);
+            });
+        }
+
+        // 캐릭터 관리 버튼
+        if (this.elements.charInfoManage) {
+            this.elements.charInfoManage.addEventListener('click', () => {
+                this.characterManager.openCharactersPanel();
             });
         }
 
