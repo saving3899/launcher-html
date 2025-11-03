@@ -1388,6 +1388,58 @@ class PanelManager {
     }
 
     /**
+     * 채팅 목록 모달 빠른 업데이트 (공통 함수)
+     * 채팅 목록 모달이 열려있을 때만 업데이트
+     * @param {string} [characterId] - 캐릭터 ID (선택, 없으면 현재 캐릭터 사용)
+     */
+    async refreshChatListPanel(characterId = null) {
+        const panelContainer = document.getElementById('panel-modal-container');
+        if (!panelContainer || panelContainer.classList.contains('hidden')) {
+            return; // 모달이 열려있지 않으면 업데이트 불필요
+        }
+
+        // 채팅 목록 모달인지 확인
+        const chatListBtn = panelContainer.querySelector('#chat-create-btn');
+        const chatImportBtn = panelContainer.querySelector('#chat-import-btn');
+        const isChatListPanel = chatListBtn || chatImportBtn || panelContainer.querySelector('[data-panel-type="chat-list"]');
+        
+        if (!isChatListPanel) {
+            return; // 채팅 목록 모달이 아니면 업데이트 불필요
+        }
+
+        try {
+            // CharacterStorage, createChatListPanel - 전역 스코프에서 사용
+            const currentCharId = characterId || 
+                                  (this.callbacks.getCurrentCharacterId ? 
+                                   await this.callbacks.getCurrentCharacterId() : 
+                                   await CharacterStorage.loadCurrent());
+            
+            if (!currentCharId) {
+                return;
+            }
+
+            const panelHtml = await createChatListPanel(currentCharId);
+            const modalContent = panelContainer.querySelector('.modal-content');
+            
+            if (modalContent) {
+                modalContent.outerHTML = panelHtml;
+                
+                // 이벤트 리스너 다시 설정
+                const closeBtn = panelContainer.querySelector('.close-panel-btn');
+                if (closeBtn) {
+                    const newCloseBtn = closeBtn.cloneNode(true);
+                    closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
+                    newCloseBtn.addEventListener('click', () => this.closePanelModal());
+                }
+                
+                this.setupPanelEvents(panelContainer, 'chat-list');
+            }
+        } catch (error) {
+            console.debug('[PanelManager.refreshChatListPanel] 채팅 목록 업데이트 오류:', error);
+        }
+    }
+
+    /**
      * 패널 UI 새로고침
      * @param {string} type - 패널 타입
      */
@@ -1414,6 +1466,31 @@ class PanelManager {
                 panelHtml = await createCharactersPanel();
                 panelContainer.innerHTML = panelHtml;
                 this.setupCharacterPanelEvents(panelContainer);
+                break;
+            case 'chats':
+            case 'chat-list':
+                // 채팅 목록 패널 새로고침
+                // CharacterStorage, createChatListPanel - 전역 스코프에서 사용
+                const currentCharId = this.callbacks.getCurrentCharacterId ? 
+                                      await this.callbacks.getCurrentCharacterId() : 
+                                      await CharacterStorage.loadCurrent();
+                if (currentCharId) {
+                    panelHtml = await createChatListPanel(currentCharId);
+                    const modalContent = panelContainer.querySelector('.modal-content');
+                    if (modalContent) {
+                        modalContent.outerHTML = panelHtml;
+                        // DOM 업데이트 완료 대기
+                        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                        // 이벤트 리스너 다시 설정
+                        const closeBtn = panelContainer.querySelector('.close-panel-btn');
+                        if (closeBtn) {
+                            const newCloseBtn = closeBtn.cloneNode(true);
+                            closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
+                            newCloseBtn.addEventListener('click', () => this.closePanelModal());
+                        }
+                        this.setupPanelEvents(panelContainer, 'chat-list');
+                    }
+                }
                 break;
             case 'world-info':
                 panelHtml = await createWorldInfoPanel();

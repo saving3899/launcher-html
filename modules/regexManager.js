@@ -135,7 +135,7 @@ function createScriptListHTML(scripts, type = 'global', characterId = null) {
                     </div>
                     <div style="flex: 1;">
                         <div class="panel-item-name">${escapeHtml(script.scriptName || '이름 없음')}</div>
-                        <div class="panel-item-meta">${ephemeralityText || '적용 위치 없음'}${script.disabled ? ' (비활성화)' : ''}</div>
+                        <div class="panel-item-meta">${ephemeralityText || '직접 편집'}${script.disabled ? ' (비활성화)' : ''}</div>
                     </div>
                 </div>
                 <div class="panel-item-actions">

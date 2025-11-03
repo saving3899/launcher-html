@@ -366,20 +366,36 @@ async function getRegexedString(rawString, placement, options = {}) {
         }
 
         // Ephemerality 체크 (markdownOnly, promptOnly)
-        // - markdownOnly가 true: isMarkdown일 때만 적용 (UI 표시 시에만)
-        // - promptOnly가 true: isPrompt일 때만 적용 (프롬프트 생성 시에만)
-        // - 둘 다 false: 항상 적용 (원본 텍스트 자체를 Replace With)
-        const { isMarkdown = false, isPrompt = false } = options;
+        // 실리태번과 동일: engine.js 293-299번 라인
+        // - markdownOnly가 true: isMarkdown이 truthy일 때만 적용 (UI 표시 시에만)
+        // - promptOnly가 true: isPrompt가 truthy일 때만 적용 (프롬프트 생성 시에만)
+        // - 둘 다 false: !isMarkdown && !isPrompt일 때만 적용 (원본 텍스트 자체에만 적용)
+        // 주의: isMarkdown이 undefined이면 !isMarkdown은 true가 됨 (직접 편집 시 적용)
+        // 실리태번 코드: (script.markdownOnly && isMarkdown) || (script.promptOnly && isPrompt) || (!script.markdownOnly && !script.promptOnly && !isMarkdown && !isPrompt)
+        // 중요: 실리태번에서는 options 객체에서 직접 구조 분해하므로 undefined가 명시적으로 전달되어도 정상 작동
+        const isMarkdown = options.isMarkdown;
+        const isPrompt = options.isPrompt;
+        
+        // 실리태번과 정확히 동일한 조건 구조
+        // markdownOnly가 true인 경우: isMarkdown이 truthy여야 함 (undefined는 falsy이므로 적용 안 됨)
+        // promptOnly가 true인 경우: isPrompt가 truthy여야 함 (undefined는 falsy이므로 적용 안 됨)
+        // 둘 다 false인 경우: !isMarkdown && !isPrompt여야 함 (undefined는 !undefined = true)
         const shouldApplyEphemerality = 
-            // markdownOnly가 true면 isMarkdown일 때만 적용
+            // Script applies to Markdown and input is Markdown
             (script.markdownOnly && isMarkdown) ||
-            // promptOnly가 true면 isPrompt일 때만 적용
+            // Script applies to Generate and input is Generate
             (script.promptOnly && isPrompt) ||
-            // 둘 다 false면 항상 적용 (Ephemerality 옵션이 없는 경우 원본 텍스트에 적용)
-            (!script.markdownOnly && !script.promptOnly);
+            // Script applies to all cases when neither "only"s are true, but there's no need to do it when `isMarkdown`, the as source (chat history) should already be changed beforehand
+            (!script.markdownOnly && !script.promptOnly && !isMarkdown && !isPrompt);
 
+        // Ephemerality 조건을 만족하지 않으면 스킵
         if (!shouldApplyEphemerality) {
+            // 디버그: markdownOnly가 true인데 적용되지 않는 경우 명확히 표시
+            if (script.markdownOnly && !isMarkdown) {
+                console.debug(`[정규식] 스킵: ${script.scriptName || '이름 없음'} - markdownOnly가 true이지만 isMarkdown이 ${isMarkdown} (truthy가 아님)`);
+            } else {
             console.debug(`[정규식] 스킵: ${script.scriptName || '이름 없음'} - Ephemerality 불일치 (markdownOnly: ${script.markdownOnly}, promptOnly: ${script.promptOnly}, isMarkdown: ${isMarkdown}, isPrompt: ${isPrompt})`);
+            }
             continue;
         }
 

@@ -197,6 +197,11 @@ class FileManager {
                 
                 // 채팅 불러오기인 경우 자동으로 채팅 로드
                 if (type === 'chat' && result.chatId && window.chatManager) {
+                    // 채팅 관리 모달 닫기
+                    if (window.panelManager) {
+                        window.panelManager.closePanelModal();
+                    }
+                    
                     // 캐릭터가 있으면 자동으로 채팅 로드
                     if (result.hasCharacter && result.characterId) {
                         // 해당 캐릭터 선택

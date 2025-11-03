@@ -146,10 +146,8 @@ class ChatCompletion {
                 this.messages.collection.push(collection);
             } else if (position >= this.messages.collection.length) {
                 // position이 배열 길이보다 크거나 같으면, 배열 끝에 추가
-                // 경고 코드 토스트 알림 표시
-                if (typeof showErrorCodeToast === 'function') {
-                    showErrorCodeToast('WARN_AI_20008', `position이 배열 길이보다 큼: ${position} >= ${this.messages.collection.length}`);
-                }
+                // 디버깅: position이 배열 길이보다 큼
+                console.debug('[ChatCompletion] position이 배열 길이보다 큼:', position, '>=', this.messages.collection.length);
                 this.messages.collection.push(collection);
             } else {
                 // 중요: position에 이미 다른 컬렉션이 있으면 경고하고 처리
@@ -160,10 +158,8 @@ class ChatCompletion {
                         this.messages.collection[position] = collection;
                     } else {
                         // 다른 identifier면 삽입 (기존 항목은 그대로 유지하고 뒤로 밀기)
-                        // 경고 코드 토스트 알림 표시
-                        if (typeof showErrorCodeToast === 'function') {
-                            showErrorCodeToast('WARN_AI_20009', `position ${position}이 이미 "${existing.identifier}"로 사용 중, "${collection.identifier}" 삽입`);
-                        }
+                        // 디버깅: position이 이미 사용 중
+                        console.debug('[ChatCompletion] position', position, '이 이미', existing.identifier, '로 사용 중,', collection.identifier, '삽입');
                         this.messages.collection.splice(position, 0, collection);
                     }
                 } else {

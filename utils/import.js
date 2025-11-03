@@ -284,6 +284,20 @@ async function importChat(file) {
             createDate = parseSillyTavernSendDate(metadata.create_date);
         }
         
+        // 현재 페르소나 정보 가져오기 (유저 메시지 아바타 매칭용)
+        let currentPersona = null;
+        try {
+            // SettingsStorage, UserPersonaStorage - 전역 스코프에서 사용
+            const settings = await SettingsStorage.load();
+            const currentPersonaId = settings.currentPersonaId;
+            if (currentPersonaId) {
+                currentPersona = await UserPersonaStorage.load(currentPersonaId);
+            }
+        } catch (error) {
+            // 페르소나 로드 실패는 무시 (기존 동작 유지)
+            console.debug('[importChat] 페르소나 로드 실패 (무시):', error);
+        }
+        
         // 메시지 변환: send_date 파싱 및 형식 변환
         const convertedMessages = messages.map(msg => {
             const converted = {
@@ -295,36 +309,219 @@ async function importChat(file) {
             // 실리태번 형식: name, is_user 필드가 있음
             // 우리 형식과 호환되도록 유지 (loadChat에서 처리)
             
+            // 유저 메시지이고 현재 페르소나 이름과 일치하면 아바타 이미지 업데이트
+            if (converted.is_user && currentPersona) {
+                const userName = converted.name || '';
+                const personaName = currentPersona.name || '';
+                
+                // 이름이 일치하고 페르소나에 아바타가 있으면 force_avatar 업데이트
+                // 중요: 페르소나 아바타는 반드시 실제 이미지 URL (data:, http://, https://)로 저장
+                if (userName === personaName && currentPersona.avatar) {
+                    // 페르소나 아바타가 실제 URL 형식인지 확인
+                    if (currentPersona.avatar.startsWith('data:') || 
+                        currentPersona.avatar.startsWith('http://') || 
+                        currentPersona.avatar.startsWith('https://')) {
+                        converted.force_avatar = currentPersona.avatar;
+                        console.debug('[importChat] 페르소나 아바타 업데이트:', {
+                            userName,
+                            personaName,
+                            avatarUrl: currentPersona.avatar.substring(0, 50)
+                        });
+                    } else {
+                        // 아바타가 URL 형식이 아니면 저장하지 않음 (loadChat에서 처리)
+                        console.debug('[importChat] 페르소나 아바타가 URL 형식이 아님, loadChat에서 처리:', currentPersona.avatar.substring(0, 50));
+                    }
+                }
+            }
+            
             return converted;
         });
         
         // send_date 기준으로 정렬 (실리태번과 동일)
         convertedMessages.sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
         
-        // 채팅 이름 생성
-        const chatName = characterName 
+        // 불러오기한 채팅의 고유 ID 생성: 원본 채팅의 create_date와 character_name 사용
+        // 같은 파일을 다시 불러와도 같은 chatId를 생성하여 중복 방지
+        const originalCreateDate = createDate;
+        // create_date가 문자열인지 확인하고, 아닐 경우 문자열로 변환
+        let originalCreateDateStr = '';
+        if (metadata.create_date) {
+            if (typeof metadata.create_date === 'string') {
+                originalCreateDateStr = metadata.create_date;
+            } else if (typeof metadata.create_date === 'number') {
+                originalCreateDateStr = new Date(metadata.create_date).toISOString();
+            } else {
+                originalCreateDateStr = String(metadata.create_date);
+            }
+        } else if (originalCreateDate) {
+            originalCreateDateStr = new Date(originalCreateDate).toISOString();
+        }
+        
+        // 채팅 이름 생성: 원본 채팅 이름이 있으면 사용, 없으면 생성 날짜 기반
+        let chatName = '';
+        if (metadata.chat_metadata?.title) {
+            chatName = metadata.chat_metadata.title;
+        } else if (originalCreateDateStr) {
+            // create_date를 읽기 가능한 형식으로 변환
+            try {
+                const date = new Date(originalCreateDate);
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                const hour = String(date.getHours()).padStart(2, '0');
+                const minute = String(date.getMinutes()).padStart(2, '0');
+                const second = String(date.getSeconds()).padStart(2, '0');
+                chatName = characterName 
+                    ? `${characterName} - ${year}-${month}-${day}@${hour}h${minute}m${second}s`
+                    : `Imported Chat - ${year}-${month}-${day}@${hour}h${minute}m${second}s`;
+            } catch (e) {
+                // 날짜 파싱 실패 시 현재 시간 사용
+                chatName = characterName 
+                    ? `${characterName} - ${humanizedDateTime()}`
+                    : `Imported Chat - ${humanizedDateTime()}`;
+            }
+        } else {
+            chatName = characterName 
             ? `${characterName} - ${humanizedDateTime()}`
             : `Imported Chat - ${humanizedDateTime()}`;
+        }
         
-        // 채팅 ID 생성
-        const chatId = characterId 
-            ? `${characterId}_${chatName.replace(/[^a-zA-Z0-9가-힣]/g, '_')}`
-            : generateChatId(metadata, file.name);
+        // 채팅 ID 생성: 원본 채팅의 create_date와 character_name을 사용하여 일관된 ID 생성
+        // 같은 채팅을 다시 불러와도 같은 ID가 생성되도록 함
+        let chatId = '';
+        if (characterId) {
+            // 원본 create_date를 ID에 포함하여 중복 방지
+            // 날짜를 숫자 문자열로 변환 (예: 2025-11-02@03h53m18s -> 20251102035318)
+            let dateSuffix = '';
+            if (originalCreateDateStr && typeof originalCreateDateStr === 'string') {
+                // ISO 형식이나 실리태번 형식에서 숫자만 추출
+                dateSuffix = originalCreateDateStr.replace(/[^0-9]/g, '').substring(0, 14);
+            }
+            if (!dateSuffix && originalCreateDate) {
+                // Date 객체에서 직접 추출
+                const date = new Date(originalCreateDate);
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                const hour = String(date.getHours()).padStart(2, '0');
+                const minute = String(date.getMinutes()).padStart(2, '0');
+                const second = String(date.getSeconds()).padStart(2, '0');
+                dateSuffix = `${year}${month}${day}${hour}${minute}${second}`;
+            }
+            if (!dateSuffix) {
+                // fallback: 메시지 해시 사용
+                const messageHash = convertedMessages.length > 0 
+                    ? convertedMessages.map(m => m.send_date || m.mes || '').join('|').substring(0, 20)
+                    : Date.now().toString().substring(0, 14);
+                dateSuffix = messageHash.replace(/[^0-9]/g, '').substring(0, 14) || Date.now().toString().substring(0, 14);
+            }
+            
+            const baseName = chatName.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+            chatId = `${characterId}_${baseName}_${dateSuffix}`;
+        } else {
+            chatId = generateChatId(metadata, file.name);
+        }
+        
+        // 중복 채팅 확인: 같은 chatId 또는 비슷한 채팅 찾기
+        // ChatStorage - 전역 스코프에서 사용
+        const allChats = await ChatStorage.loadAll();
+        
+        // 1. 같은 chatId가 있는지 확인 (삭제된 채팅 제외)
+        const existingChatById = allChats[chatId];
+        if (existingChatById && existingChatById !== null && existingChatById.metadata?.isImported) {
+            // 기존 채팅의 imported_date와 lastMessageDate를 업데이트 (최근 불러온 채팅으로 표시)
+            const importedDate = Date.now(); // 현재 시간
+            existingChatById.metadata.imported_date = importedDate;
+            existingChatById.lastMessageDate = importedDate;
+            
+            // 업데이트된 채팅 저장
+            await ChatStorage.save(chatId, existingChatById);
+            
+            console.log('[importChat] 같은 chatId의 불러오기 채팅 발견, 기존 채팅 사용 및 업데이트:', chatId);
+            return {
+                success: true,
+                chatId: chatId,
+                characterId: characterId,
+                characterName: characterName,
+                metadata: existingChatById.metadata,
+                messageCount: existingChatById.messages?.length || 0,
+                isExisting: true
+            };
+        }
+        
+        // 2. 같은 characterId이고 같은 메시지 개수와 원본 create_date를 가진 채팅 찾기
+        const similarChats = Object.entries(allChats)
+            .filter(([id, chat]) => {
+                // 삭제된 채팅 제외
+                if (!chat || chat === null) return false;
+                
+                // 같은 캐릭터의 불러오기한 채팅만 확인
+                if (!chat.metadata?.isImported) return false;
+                if (chat.characterId !== characterId && chat.metadata?.characterId !== characterId) return false;
+                
+                // 원본 create_date가 같은지 확인
+                const chatCreateDate = chat.metadata?.create_date || 0;
+                const thisCreateDate = createDate || 0;
+                
+                // 날짜가 1초 이내 차이면 같은 채팅으로 간주 (타임존 차이 고려)
+                const dateDiff = Math.abs(chatCreateDate - thisCreateDate);
+                if (dateDiff > 1000) return false; // 1초 이상 차이면 다른 채팅
+                
+                // 메시지 개수가 같은지 확인
+                const chatMessageCount = chat.messages?.length || 0;
+                const thisMessageCount = convertedMessages.length;
+                if (Math.abs(chatMessageCount - thisMessageCount) > 0) return false;
+                
+                return true;
+            });
+        
+        if (similarChats.length > 0) {
+            // 가장 최근에 불러온 채팅 사용 (imported_date 기준)
+            const mostRecent = similarChats
+                .map(([id, chat]) => ({
+                    id,
+                    chat,
+                    importedDate: chat.metadata?.imported_date || 0
+                }))
+                .sort((a, b) => b.importedDate - a.importedDate)[0];
+            
+            // 기존 채팅의 imported_date와 lastMessageDate를 업데이트 (최근 불러온 채팅으로 표시)
+            const importedDate = Date.now(); // 현재 시간
+            mostRecent.chat.metadata.imported_date = importedDate;
+            mostRecent.chat.lastMessageDate = importedDate;
+            
+            // 업데이트된 채팅 저장
+            await ChatStorage.save(mostRecent.id, mostRecent.chat);
+            
+            console.log('[importChat] 비슷한 불러오기 채팅 발견, 기존 채팅 사용 및 업데이트:', mostRecent.id);
+            return {
+                success: true,
+                chatId: mostRecent.id,
+                characterId: characterId,
+                characterName: characterName,
+                metadata: mostRecent.chat.metadata,
+                messageCount: mostRecent.chat.messages?.length || 0,
+                isExisting: true
+            };
+        }
         
         // 채팅 데이터 구성 (우리 형식)
+        // 불러오기한 채팅의 lastMessageDate는 불러온 시간으로 설정 (채팅 목록에서 최신순 정렬 반영)
+        const importedDate = Date.now(); // 불러온 시간
         const chatData = {
             characterId: characterId, // 없으면 null
             chatName: chatName,
             metadata: {
                 user_name: metadata.user_name || 'User',
                 character_name: characterName,
-                create_date: createDate,
+                create_date: createDate, // 원본 채팅의 생성 날짜 (실리태번 호환)
+                imported_date: importedDate, // 불러온 시간 (정렬용)
                 chat_metadata: metadata.chat_metadata || {},
+                isImported: true, // 불러오기한 채팅 표시
             },
             messages: convertedMessages,
-            lastMessageDate: convertedMessages.length > 0 
-                ? convertedMessages[convertedMessages.length - 1].send_date 
-                : createDate,
+            // 불러오기한 채팅은 불러온 시간을 lastMessageDate로 사용 (채팅 목록 정렬 반영)
+            lastMessageDate: importedDate,
         };
         
         // 채팅 저장

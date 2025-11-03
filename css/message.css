@@ -86,6 +86,11 @@
     flex-shrink: 0;
 }
 
+/* 유저 메시지의 아바타-이름 컨테이너만 flex-end 정렬 */
+.message.user .message-avatar-name {
+    align-items: flex-end;
+}
+
 /* 메시지 이름 */
 .message-name {
     font-size: 14px;

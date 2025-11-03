@@ -241,13 +241,13 @@ function showErrorCodeToast(errorCode, description, error = null) {
     
     toast.innerHTML = `
         <div class="toast-wrapper">
-            <div class="toast-content">
-                <div class="toast-icon">${icon}</div>
-                <div class="toast-message">${messageText}</div>
-            </div>
-            <button class="toast-close" aria-label="닫기">
-                <i class="fa-solid fa-xmark"></i>
-            </button>
+        <div class="toast-content">
+            <div class="toast-icon">${icon}</div>
+            <div class="toast-message">${messageText}</div>
+        </div>
+        <button class="toast-close" aria-label="닫기">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
         </div>
     `;
 

@@ -1375,10 +1375,8 @@ class PromptManager {
                 if (!prompt.content || prompt.content.trim() === '') {
                     // main 프롬프트와 marker 프롬프트는 예외 (확장 기능을 위해 빈 content로도 추가 가능)
                     if (entry.identifier !== 'main' && !prompt.marker) {
-                        // 경고 코드 토스트 알림 표시
-                        if (typeof showErrorCodeToast === 'function') {
-                            showErrorCodeToast('WARN_PROMPT_20006', `빈 내용의 프롬프트 건너뛰기: ${entry.identifier}`);
-                        }
+                        // 디버깅: 빈 내용의 프롬프트 건너뛰기
+                        console.debug('[PromptManager] 빈 내용의 프롬프트 건너뛰기:', entry.identifier);
                         return;
                     }
                 }
@@ -1426,10 +1424,8 @@ class PromptManager {
         // 주의: sanitizeServiceSettings에서 자동으로 prompt_order에 추가되므로, 여기서 발견되는 경우는 드물어야 함
         // 하지만 안전을 위해 여전히 포함시킴 (enabled 상태는 기본값 true로 가정)
         if (userAddedPrompts.length > 0) {
-            // 경고 코드 토스트 알림 표시
-            if (typeof showErrorCodeToast === 'function') {
-                showErrorCodeToast('WARN_PROMPT_20007', `사용자 추가 프롬프트가 prompt_order에 없음: ${userAddedPrompts.length}개`);
-            }
+            // 디버깅: 사용자 추가 프롬프트가 prompt_order에 없음
+            console.debug('[PromptManager] 사용자 추가 프롬프트가 prompt_order에 없음:', userAddedPrompts.length, '개');
             
             // 동시에 prompt_order에도 자동 추가 (다음 번에는 포함되도록)
             const dummyCharacter = { id: this.configuration.promptOrder.dummyId };
@@ -1439,10 +1435,8 @@ class PromptManager {
             userAddedPrompts.forEach(prompt => {
                 // enabled 상태 확인 (prompt_order에 없으면 기본적으로 enabled로 가정)
                 if (!prompt.content || prompt.content.trim() === '') {
-                    // 경고 코드 토스트 알림 표시
-                    if (typeof showErrorCodeToast === 'function') {
-                        showErrorCodeToast('WARN_PROMPT_20006', `빈 내용의 프롬프트 건너뛰기: ${prompt.identifier}`);
-                    }
+                    // 디버깅: 빈 내용의 프롬프트 건너뛰기
+                    console.debug('[PromptManager] 빈 내용의 프롬프트 건너뛰기:', prompt.identifier);
                     return;
                 }
                 

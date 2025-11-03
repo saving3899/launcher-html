@@ -407,11 +407,46 @@ async function createChatListPanel(characterId) {
     // 실리태번과 동일: characterId로 필터링 (chatId 형식: "characterId_chatName")
     const allChats = await ChatStorage.loadAll();
     const filteredChats = Object.entries(allChats).filter(([id, chat]) => {
+        // 삭제된 채팅 제외 (chat 데이터가 없거나 null인 경우)
+        if (!chat || chat === null) {
+            return false;
+        }
+        
         // chatId가 "characterId_"로 시작하는지 확인
         return id.startsWith(`${characterId}_`) || chat?.characterId === characterId;
     });
     
-    const chatList = filteredChats.map(([id, chat]) => {
+    // 실리태번과 동일: lastMessageDate 기준으로 최신순 정렬
+    const sortedChats = filteredChats.map(([id, chat]) => {
+        // lastMessageDate 계산: 저장된 lastMessageDate가 있으면 우선 사용, 없으면 계산
+        let lastMessageDate = chat?.lastMessageDate || 0;
+        
+        if (lastMessageDate === 0 && chat?.messages && chat.messages.length > 0) {
+            // send_date 기준으로 정렬하여 마지막 메시지 찾기
+            const sortedMessages = [...chat.messages].sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
+            const lastMessage = sortedMessages[sortedMessages.length - 1];
+            lastMessageDate = lastMessage.send_date || 0;
+        }
+        
+        if (lastMessageDate === 0) {
+            // 메시지가 없으면 create_date 사용
+            lastMessageDate = chat?.metadata?.create_date || 
+                             chat?.metadata?.chat_metadata?.create_date || 
+                             chat?.create_date || 
+                             0;
+        }
+        
+        return { id, chat, lastMessageDate };
+    }).sort((a, b) => {
+        // 최신순 정렬: lastMessageDate 기준
+        if (b.lastMessageDate !== a.lastMessageDate) {
+            return b.lastMessageDate - a.lastMessageDate;
+        }
+        // lastMessageDate가 같으면 chatId로 비교 (더 최근에 생성된 채팅이 먼저)
+        return b.id.localeCompare(a.id);
+    });
+    
+    const chatList = sortedChats.map(({ id, chat }) => {
         // 메시지 카운팅: messages 배열 사용 (저장 시 사용하는 필드와 일치)
         const messageCount = chat?.messages?.length || chat?.chat?.length || 0;
         const lastMessage = messageCount > 0 ? '최근 메시지 있음' : '새 채팅';

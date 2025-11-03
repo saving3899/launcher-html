@@ -238,10 +238,8 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
             lastMessage.content !== userMessage;
         
         if (needsUserMessage) {
-            // 경고 코드 토스트 알림 표시
-            if (typeof showErrorCodeToast === 'function') {
-                showErrorCodeToast('WARN_AI_20008', '사용자 메시지가 채팅 히스토리에 없음, 추가함');
-            }
+            // 디버깅: 사용자 메시지가 채팅 히스토리에 없음, 추가함
+            console.debug('[AIMessageSender] 사용자 메시지가 채팅 히스토리에 없음, 추가함');
             chatHistory = [...chatHistory, { role: 'user', content: userMessage }];
         }
     }
@@ -562,8 +560,8 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
                     await chatManager.addMessage(responseText, 'assistant', characterName, characterAvatar);
                 }
             } else {
-                // 정규식은 addMessage에서 적용되므로 원본 텍스트 전달
-                await chatManager.addMessage(responseText, 'assistant', characterName, characterAvatar);
+            // 정규식은 addMessage에서 적용되므로 원본 텍스트 전달
+            await chatManager.addMessage(responseText, 'assistant', characterName, characterAvatar);
             }
         }
     } catch (error) {

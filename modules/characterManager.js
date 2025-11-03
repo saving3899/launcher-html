@@ -111,15 +111,13 @@ class CharacterManager {
                 } else {
                     // 다른 캐릭터로 변경하는 경우: 채팅 영역이 비어있어야 함
                     // (이미 위에서 초기화했지만, 혹시 남아있으면 다시 확인)
-                    if (chatManager.elements && chatManager.elements.chatMessages) {
-                        if (chatManager.elements.chatMessages.children.length > 0) {
-                            // 다른 캐릭터로 변경할 때만 경고 표시
-                            // 경고 코드 토스트 알림 표시
-                            if (typeof showErrorCodeToast === 'function') {
-                                showErrorCodeToast('WARN_CHAR_20001', '채팅 메시지가 여전히 존재함');
-                            }
-                            chatManager.elements.chatMessages.innerHTML = '';
-                            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                if (chatManager.elements && chatManager.elements.chatMessages) {
+                    if (chatManager.elements.chatMessages.children.length > 0) {
+                            // 다른 캐릭터로 변경 시 남아있는 메시지 정리 (정상적인 흐름)
+                            // 디버깅 정보는 콘솔에만 기록 (토스트 제거)
+                            console.debug('[CharacterManager] 다른 캐릭터 선택 시 채팅 메시지 정리');
+                        chatManager.elements.chatMessages.innerHTML = '';
+                        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
                         }
                     }
                 }
@@ -127,8 +125,8 @@ class CharacterManager {
                 // 채팅 로드 또는 생성
                 await chatManager.loadOrCreateChat(characterId);
                 
-                // DOM 업데이트 대기 (채팅 로드 완료 후)
-                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                // DOM 업데이트 대기 (채팅 로드 완료 후, 한 번만)
+                await new Promise(resolve => requestAnimationFrame(resolve));
                 
                 // 인풋창 높이 리셋 (채팅 로드 후에도 비어있을 수 있으므로)
                 if (chatManager.elements && chatManager.elements.messageInput) {

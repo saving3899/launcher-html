@@ -8,6 +8,7 @@
 class SettingsManager {
     constructor(elements) {
         this.elements = elements;
+        this.isValidating = false; // JSON 검증 중 플래그
         this.setupEventListeners();
     }
 
@@ -53,9 +54,16 @@ class SettingsManager {
         // Google Vertex AI Service Account JSON Validate 버튼
         const vertexaiValidateBtn = document.getElementById('vertexai_validate_service_account');
         if (vertexaiValidateBtn) {
-            vertexaiValidateBtn.addEventListener('click', () => {
+            // 기존 리스너 제거 후 새로 등록 (중복 방지)
+            const newHandler = () => {
                 this.validateVertexAIServiceAccount();
-            });
+            };
+            // 기존 리스너가 있다면 제거
+            if (vertexaiValidateBtn._validateHandler) {
+                vertexaiValidateBtn.removeEventListener('click', vertexaiValidateBtn._validateHandler);
+            }
+            vertexaiValidateBtn._validateHandler = newHandler;
+            vertexaiValidateBtn.addEventListener('click', newHandler);
         }
 
         // Connect 버튼
@@ -107,15 +115,25 @@ class SettingsManager {
      * Google Vertex AI Service Account JSON 검증
      */
     async validateVertexAIServiceAccount() {
+        // 중복 호출 방지
+        if (this.isValidating) {
+            return;
+        }
+        this.isValidating = true;
+
         const jsonInput = document.getElementById('vertexai_service_account_json');
         const statusDiv = document.getElementById('vertexai_service_account_status');
         const infoSpan = document.getElementById('vertexai_service_account_info');
         
-        if (!jsonInput || !statusDiv || !infoSpan) return;
+        if (!jsonInput || !statusDiv || !infoSpan) {
+            this.isValidating = false;
+            return;
+        }
 
         const jsonContent = jsonInput.value.trim();
         if (!jsonContent) {
             showToast('Please enter Service Account JSON content', 'warning');
+            this.isValidating = false;
             return;
         }
 
@@ -129,6 +147,7 @@ class SettingsManager {
                 statusDiv.className = 'info-block error';
                 infoSpan.textContent = `Missing required fields: ${missingFields.join(', ')}`;
                 showToast(`Missing required fields: ${missingFields.join(', ')}`, 'error');
+                this.isValidating = false;
                 return;
             }
 
@@ -137,6 +156,7 @@ class SettingsManager {
                 statusDiv.className = 'info-block error';
                 infoSpan.textContent = 'Invalid service account type. Expected "service_account"';
                 showToast('Invalid service account type. Expected "service_account"', 'error');
+                this.isValidating = false;
                 return;
             }
 
@@ -146,7 +166,8 @@ class SettingsManager {
             infoSpan.textContent = `Project: ${serviceAccount.project_id}, Email: ${serviceAccount.client_email}`;
             
             showToast('Service Account JSON is valid', 'success');
-            this.saveSettings();
+            await this.saveSettings();
+            this.isValidating = false;
         } catch (error) {
             // 오류 코드 토스트 알림 표시
             if (typeof showErrorCodeToast === 'function') {
@@ -156,6 +177,7 @@ class SettingsManager {
             statusDiv.className = 'info-block error';
             infoSpan.textContent = 'Invalid JSON format';
             showToast('Invalid JSON format', 'error');
+            this.isValidating = false;
         }
     }
 

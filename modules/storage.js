@@ -80,10 +80,31 @@ async function loadAllFromIndexedDB(storeName) {
                 
                 const result = {};
                 orderedKeys.forEach((key, index) => {
-                    if (values[index]) {
+                    // 삭제된 항목(undefined)은 제외
+                    if (values[index] !== undefined && values[index] !== null) {
                         result[key] = values[index];
                     }
                 });
+                
+                // 삭제된 키가 메타데이터에 남아있으면 정리
+                const existingKeys = Object.keys(result);
+                if (existingKeys.length !== orderedKeys.length) {
+                    // 메타데이터에서 삭제된 키 제거
+                    const updatedKeys = orderedKeys.filter(key => existingKeys.includes(key));
+                    if (updatedKeys.length !== orderedKeys.length) {
+                        // 메타데이터 업데이트 (비동기로 처리하여 성능 영향 최소화)
+                        requestAnimationFrame(async () => {
+                            try {
+                                const updateDb = await openIndexedDB();
+                                const updateTransaction = updateDb.transaction([storeName], 'readwrite');
+                                const updateStore = updateTransaction.objectStore(storeName);
+                                await updateStore.put(updatedKeys, '_meta');
+                            } catch (error) {
+                                console.debug('[loadAllFromIndexedDB] 메타데이터 정리 실패 (무시):', error);
+                            }
+                        });
+                    }
+                }
                 
                 resolve(result);
             } else {
@@ -116,7 +137,8 @@ async function loadAllFromIndexedDB(storeName) {
                 
                 const result = {};
                 keys.forEach((key, index) => {
-                    if (values[index]) {
+                    // 삭제된 항목(undefined, null)은 제외
+                    if (values[index] !== undefined && values[index] !== null) {
                         result[key] = values[index];
                     }
                 });
@@ -463,7 +485,15 @@ class ChatStorage {
     }
 
     static async loadAll() {
-        return await loadAllFromIndexedDB('chats');
+        const allChats = await loadAllFromIndexedDB('chats');
+        // 삭제된 채팅 필터링 (null이나 undefined인 경우 제외)
+        const filteredChats = {};
+        for (const [chatId, chatData] of Object.entries(allChats)) {
+            if (chatData !== null && chatData !== undefined) {
+                filteredChats[chatId] = chatData;
+            }
+        }
+        return filteredChats;
     }
 
     static async save(chatId, chatData) {

@@ -35,10 +35,8 @@ async function addToChatCompletion(prompts, chatCompletion, promptManager, token
     
     // 디버깅: user role 프롬프트 확인
     if (message.role === 'user') {
-        // 경고 코드 토스트 알림 표시
-        if (typeof showErrorCodeToast === 'function') {
-            showErrorCodeToast('WARN_AI_20001', `프롬프트 "${source}"가 user role을 가짐`);
-        }
+        // 디버깅: 프롬프트가 user role을 가짐
+        console.debug('[PopulateChatCompletion] 프롬프트가 user role을 가짐:', source);
     }
     
     collection.add(message);

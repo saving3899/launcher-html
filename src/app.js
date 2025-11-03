@@ -306,19 +306,10 @@ class MobileChatApp {
         try {
             const debugInfo = JSON.parse(localStorage.getItem('chatLoadDebug') || '[]');
             if (debugInfo.length > 0) {
-                // 최신 정보가 새 채팅 생성인 경우 경고
+                // 디버깅 정보는 콘솔에만 기록 (토스트 제거 - 정상적인 경우)
                 const latest = debugInfo[debugInfo.length - 1];
-                if (latest && latest.type === 'creatingNewChat') {
-                    // 경고 코드 토스트 알림 표시
-                    if (typeof showErrorCodeToast === 'function') {
-                        showErrorCodeToast('WARN_APP_20001', '최근에 새 채팅이 생성되었습니다');
-                    }
-                }
-                if (latest && latest.type === 'noChatsFound') {
-                    // 경고 코드 토스트 알림 표시
-                    if (typeof showErrorCodeToast === 'function') {
-                        showErrorCodeToast('WARN_APP_20002', '최근에 채팅을 찾지 못했습니다');
-                    }
+                if (latest) {
+                    console.debug('[App] 디버깅 정보 확인:', latest);
                 }
             }
         } catch (e) {
@@ -640,8 +631,18 @@ class MobileChatApp {
 
         // 7. 페이지 언로드 전 채팅 저장 (새로고침/닫기 전)
         // visibilitychange 이벤트 사용 (beforeunload보다 더 신뢰성 있음)
+        // 탭 전환 시마다 호출되는 것을 방지하기 위해 한 번만 저장
+        let lastVisibilitySaveTime = 0;
+        const VISIBILITY_SAVE_THROTTLE = 5000; // 5초 내 중복 저장 방지
+        
         document.addEventListener('visibilitychange', async () => {
             if (document.visibilityState === 'hidden' && this.chatManager && this.chatManager.currentCharacterId) {
+                const now = Date.now();
+                // 최근 5초 내에 저장했으면 건너뛰기 (중복 저장 방지)
+                if (now - lastVisibilitySaveTime < VISIBILITY_SAVE_THROTTLE) {
+                    return;
+                }
+                
                 // 디바운스 타이머 취소하고 즉시 저장
                 if (this.chatManager.saveChatDebounceTimer) {
                     clearTimeout(this.chatManager.saveChatDebounceTimer);
@@ -652,6 +653,7 @@ class MobileChatApp {
                 if (!this.chatManager._isSavingChat && 
                     this.chatManager.elements?.chatMessages?.children?.length > 0) {
                     try {
+                        lastVisibilitySaveTime = now;
                         await this.chatManager.saveChat();
                     } catch (error) {
                         // 오류 코드 토스트 알림 표시

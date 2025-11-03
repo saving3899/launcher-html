@@ -2207,18 +2207,18 @@ async function setupPromptsPanelEvents(panelContainer) {
     let presetSelect = panelContainer.querySelector('#settings_preset_openai');
     if (presetSelect && lastSelectedPreset && lastSelectedPreset !== 'Default' && lastSelectedPreset !== 'gui') {
         try {
-            // PresetManager 등록 (임시로 생성, 나중에 다시 사용)
-            const tempManager = registerPresetManager(presetSelect, 'openai');
-            const { preset_names } = await tempManager.getPresetList();
-            const presetIndex = preset_names[lastSelectedPreset];
-            
-            if (presetIndex !== undefined) {
-                // 프리셋 데이터 가져오기
-                const preset = await tempManager.getCompletionPresetByName(lastSelectedPreset);
-                if (preset) {
-                    presetToLoad = preset;
-                    shouldLoadPreset = true;
-                }
+        // PresetManager 등록 (임시로 생성, 나중에 다시 사용)
+        const tempManager = registerPresetManager(presetSelect, 'openai');
+        const { preset_names } = await tempManager.getPresetList();
+        const presetIndex = preset_names[lastSelectedPreset];
+        
+        if (presetIndex !== undefined) {
+            // 프리셋 데이터 가져오기
+            const preset = await tempManager.getCompletionPresetByName(lastSelectedPreset);
+            if (preset) {
+                presetToLoad = preset;
+                shouldLoadPreset = true;
+            }
             }
         } catch (error) {
             console.warn('프리셋 로드 실패:', error);
@@ -2229,25 +2229,25 @@ async function setupPromptsPanelEvents(panelContainer) {
     // 프리셋이 있으면 프리셋 설정을 먼저 적용하고, 없으면 일반 설정 로드
     if (shouldLoadPreset && presetToLoad) {
         try {
-            // 프리셋 설정을 SettingsStorage에 먼저 적용 (프롬프트 포함)
-            const currentSettings = await SettingsStorage.load();
-            const { prompts: presetPrompts, prompt_order: presetPromptOrder, ...presetSettingsWithoutPrompts } = presetToLoad;
-            
-            const mergedForLoad = {
-                ...currentSettings,
-                ...presetSettingsWithoutPrompts,
-                preset_settings_openai: presetToLoad.name || 'Default',
-            };
-            
-            // 프롬프트도 포함
-            if (presetPrompts !== undefined && Array.isArray(presetPrompts) && presetPrompts.length > 0) {
-                mergedForLoad.prompts = presetPrompts;
-            }
-            if (presetPromptOrder !== undefined && Array.isArray(presetPromptOrder) && presetPromptOrder.length > 0) {
-                mergedForLoad.prompt_order = presetPromptOrder;
-            }
-            
-            await SettingsStorage.save(mergedForLoad);
+        // 프리셋 설정을 SettingsStorage에 먼저 적용 (프롬프트 포함)
+        const currentSettings = await SettingsStorage.load();
+        const { prompts: presetPrompts, prompt_order: presetPromptOrder, ...presetSettingsWithoutPrompts } = presetToLoad;
+        
+        const mergedForLoad = {
+            ...currentSettings,
+            ...presetSettingsWithoutPrompts,
+            preset_settings_openai: presetToLoad.name || 'Default',
+        };
+        
+        // 프롬프트도 포함
+        if (presetPrompts !== undefined && Array.isArray(presetPrompts) && presetPrompts.length > 0) {
+            mergedForLoad.prompts = presetPrompts;
+        }
+        if (presetPromptOrder !== undefined && Array.isArray(presetPromptOrder) && presetPromptOrder.length > 0) {
+            mergedForLoad.prompt_order = presetPromptOrder;
+        }
+        
+        await SettingsStorage.save(mergedForLoad);
             presetAlreadyLoaded = true; // 프리셋 적용 완료
         } catch (error) {
             console.warn('프리셋 설정 저장 실패:', error);
@@ -2392,23 +2392,23 @@ async function setupPromptsPanelEvents(panelContainer) {
                 // PromptManager가 초기화된 후에만 접근
                 if (window.promptManagerInstance) {
                     const promptManager = window.promptManagerInstance;
-                    const mainPrompt = promptManager.getPromptById('main');
-                    const nsfwPrompt = promptManager.getPromptById('nsfw');
-                    const jailbreakPrompt = promptManager.getPromptById('jailbreak');
-                    
-                    const mainQuickEdit = panelContainer.querySelector('#main_prompt_quick_edit_textarea');
-                    const nsfwQuickEdit = panelContainer.querySelector('#nsfw_prompt_quick_edit_textarea');
-                    const jailbreakQuickEdit = panelContainer.querySelector('#jailbreak_prompt_quick_edit_textarea');
-                    
-                    if (mainQuickEdit && mainPrompt) {
-                        mainQuickEdit.value = mainPrompt.content || '';
-                    }
-                    if (nsfwQuickEdit && nsfwPrompt) {
-                        nsfwQuickEdit.value = nsfwPrompt.content || '';
-                    }
-                    if (jailbreakQuickEdit && jailbreakPrompt) {
-                        jailbreakQuickEdit.value = jailbreakPrompt.content || '';
-                    }
+                const mainPrompt = promptManager.getPromptById('main');
+                const nsfwPrompt = promptManager.getPromptById('nsfw');
+                const jailbreakPrompt = promptManager.getPromptById('jailbreak');
+                
+                const mainQuickEdit = panelContainer.querySelector('#main_prompt_quick_edit_textarea');
+                const nsfwQuickEdit = panelContainer.querySelector('#nsfw_prompt_quick_edit_textarea');
+                const jailbreakQuickEdit = panelContainer.querySelector('#jailbreak_prompt_quick_edit_textarea');
+                
+                if (mainQuickEdit && mainPrompt) {
+                    mainQuickEdit.value = mainPrompt.content || '';
+                }
+                if (nsfwQuickEdit && nsfwPrompt) {
+                    nsfwQuickEdit.value = nsfwPrompt.content || '';
+                }
+                if (jailbreakQuickEdit && jailbreakPrompt) {
+                    jailbreakQuickEdit.value = jailbreakPrompt.content || '';
+                }
                 }
             }
             // PromptManager가 없으면 조용히 넘어감 (초기화되지 않은 상태에서 프리셋 변경 시)
@@ -2424,23 +2424,23 @@ async function setupPromptsPanelEvents(panelContainer) {
         
         if (lastSelectedPresetForRestore && lastSelectedPresetForRestore !== 'Default' && lastSelectedPresetForRestore !== 'gui') {
             try {
-                // preset 이름으로 찾기
-                const { preset_names } = await manager.getPresetList();
-                const presetIndex = preset_names[lastSelectedPresetForRestore];
-                
-                // 셀렉트에 올바른 값이 설정되어 있는지 확인
-                const currentSelectName = manager.getSelectedPresetName();
-                if (presetIndex !== undefined) {
+            // preset 이름으로 찾기
+            const { preset_names } = await manager.getPresetList();
+            const presetIndex = preset_names[lastSelectedPresetForRestore];
+            
+            // 셀렉트에 올바른 값이 설정되어 있는지 확인
+            const currentSelectName = manager.getSelectedPresetName();
+            if (presetIndex !== undefined) {
                     // 셀렉트 값이 올바르지 않으면 설정 (UI만 업데이트)
-                    if (currentSelectName !== lastSelectedPresetForRestore && manager.select) {
-                        manager.select.value = String(presetIndex);
-                    }
-                    
+                if (currentSelectName !== lastSelectedPresetForRestore && manager.select) {
+                    manager.select.value = String(presetIndex);
+                }
+                
                     // 이미 위에서 프리셋을 적용하지 않았을 때만 selectPreset 호출 (applyPresetSettings 포함)
                     // presetAlreadyLoaded가 false일 때만 적용 (이미 적용했다면 중복 방지)
                     if (!presetAlreadyLoaded) {
-                        await manager.selectPreset(presetIndex);
-                    }
+                    await manager.selectPreset(presetIndex);
+                }
                 }
             } catch (error) {
                 // 에러 발생 시 로그만 남기고 계속 진행 (기본 프리셋 사용)
@@ -2590,15 +2590,15 @@ async function setupPromptsPanelEvents(panelContainer) {
                         // registerPresetManager - 전역 스코프에서 사용
                         const manager = registerPresetManager(presetSelect, 'openai');
                         const { presets, preset_names } = await manager.getPresetList();
-                        const presetIndex = preset_names[currentPresetName];
-                        if (presetIndex !== undefined && presets[presetIndex]) {
-                            const currentPreset = presets[presetIndex];
-                            // 프리셋에 prompts/prompt_order가 있으면 사용
-                            if (currentPreset.prompts !== undefined && Array.isArray(currentPreset.prompts) && currentPreset.prompts.length > 0) {
-                                prompts = currentPreset.prompts;
-                            }
-                            if (currentPreset.prompt_order !== undefined && Array.isArray(currentPreset.prompt_order) && currentPreset.prompt_order.length > 0) {
-                                prompt_order = currentPreset.prompt_order;
+                    const presetIndex = preset_names[currentPresetName];
+                    if (presetIndex !== undefined && presets[presetIndex]) {
+                        const currentPreset = presets[presetIndex];
+                        // 프리셋에 prompts/prompt_order가 있으면 사용
+                        if (currentPreset.prompts !== undefined && Array.isArray(currentPreset.prompts) && currentPreset.prompts.length > 0) {
+                            prompts = currentPreset.prompts;
+                        }
+                        if (currentPreset.prompt_order !== undefined && Array.isArray(currentPreset.prompt_order) && currentPreset.prompt_order.length > 0) {
+                            prompt_order = currentPreset.prompt_order;
                             }
                         }
                     }
