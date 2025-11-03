@@ -409,14 +409,28 @@ class PresetManager {
         const { prompts: currentPrompts, prompt_order: currentPromptOrder, ...restCurrentSettings } = currentSettings;
         const { prompts: presetPrompts, prompt_order: presetPromptOrder, ...restPresetData } = settingsToSave;
         
-        // 기본 설정 병합 (prompts/prompt_order 제외)
+        // prompts와 prompt_order 제외하고 apiProvider, apiKeys, apiModels도 별도 처리
+        const { apiProvider: presetApiProvider, apiKeys: presetApiKeys, apiModels: presetApiModels, ...restPresetDataWithoutApi } = restPresetData;
+        
+        // 기본 설정 병합 (prompts/prompt_order, apiProvider, apiKeys, apiModels 제외)
         // 실리태번 방식: 프리셋에 정의된 필드는 프리셋 값을 사용하고,
         // 프리셋에 없는 필드는 현재 설정에서 유지
         const mergedSettings = {
             ...restCurrentSettings,
-            ...restPresetData,
+            ...restPresetDataWithoutApi,
             preset_settings_openai: preset.name || 'Default',
         };
+        
+        // apiProvider, apiKeys, apiModels 처리 (프리셋에 있으면 사용)
+        if (presetApiProvider) {
+            mergedSettings.apiProvider = presetApiProvider;
+        }
+        if (presetApiKeys) {
+            mergedSettings.apiKeys = presetApiKeys;
+        }
+        if (presetApiModels) {
+            mergedSettings.apiModels = presetApiModels;
+        }
         
         // prompts와 prompt_order 처리
         // Default 프리셋인 경우:

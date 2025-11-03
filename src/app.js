@@ -55,6 +55,20 @@ class MobileChatApp {
         // 모듈 초기화 (동기 함수이므로 chatManager, characterManager가 생성됨)
         this.initializeModules();
         
+        // 설정 로드 (새로고침 후에도 유지되도록)
+        // DOM이 준비된 후 설정 로드 (chat-completion-source select가 필요)
+        // init()은 DOMContentLoaded 후에 호출되므로 DOM은 이미 준비됨
+        if (this.settingsManager) {
+            // 약간의 지연을 주어 모든 모듈이 완전히 초기화된 후 설정 로드
+            setTimeout(async () => {
+                try {
+                    await this.settingsManager.loadSettings();
+                } catch (error) {
+                    console.error('설정 로드 실패:', error);
+                }
+            }, 100);
+        }
+        
         // 디버깅 정보 확인 (페이지 로드 시)
         this.checkChatLoadDebugInfo();
         
@@ -573,6 +587,8 @@ class MobileChatApp {
 
         // 2. 설정 관리자
         this.settingsManager = new SettingsManager(this.elements);
+        // 전역 접근을 위해 window에 저장
+        window.settingsManager = this.settingsManager;
 
         // 3. 메뉴 관리자
         this.menuManager = new MenuManager(this.elements);

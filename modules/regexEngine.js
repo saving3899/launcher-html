@@ -193,19 +193,16 @@ function runRegexScript(regexScript, rawString, { characterOverride, userName, c
     // 실리태번과 동일: 정규식 교체 실행 (364번 라인)
     newString = rawString.replace(globalRegex, function (match) {
         const args = [...arguments];
-        // replaceString이 undefined나 null이면 빈 문자열로, 그 외에는 그대로 사용 (빈 문자열도 유효한 값)
-        let replaceString = regexScript.replaceString != null ? regexScript.replaceString : '';
+        // replaceString이 undefined나 null이면 빈 문자열로, 그 외에는 그대로 사용
+        // 실리태번과 동일: replaceString이 항상 문자열이라고 가정하고 .replace()를 바로 호출
+        let replaceString = (regexScript.replaceString != null && typeof regexScript.replaceString === 'string') 
+            ? regexScript.replaceString 
+            : '';
 
         // 디버깅: 매칭 정보
         console.debug(`[정규식 매칭] 패턴: ${globalRegex.source}, 매칭: ${match}, 위치: ${args[args.length - 2]}, replaceString: "${replaceString}" (길이: ${replaceString.length})`);
 
-        // replaceString이 빈 문자열이거나 공백만 있으면 매칭된 문자열을 삭제
-        if (replaceString === '' || (typeof replaceString === 'string' && replaceString.trim() === '')) {
-            console.debug(`[정규식 교체] replaceString이 비어있어서 매칭 삭제: "${match}"`);
-            return '';
-        }
-
-        // {{match}}를 $0으로 치환
+        // {{match}}를 $0으로 치환 (실리태번과 동일: 빈 문자열 체크 전에 처리)
         replaceString = replaceString.replace(/{{match}}/gi, '$0');
 
         // 실리태번과 동일: Capture groups 처리 (367번 라인)
@@ -236,11 +233,9 @@ function runRegexScript(regexScript, rawString, { characterOverride, userName, c
         // userName과 charName을 전달하여 {{user}}, {{char}} 매크로 치환
         const finalReplaceString = substituteParams(replaceWithGroups, userName || '', charName || '');
 
-        // 최종 결과가 빈 문자열이거나 공백만 있으면 매칭된 문자열을 삭제
-        if (finalReplaceString === '' || (typeof finalReplaceString === 'string' && finalReplaceString.trim() === '')) {
-            return '';
-        }
-
+        // 실리태번과 동일: 매크로 치환 결과를 그대로 반환 (빈 문자열도 유효한 값)
+        // Replace With가 빈 문자열이면 매칭된 부분이 빈 문자열로 치환됨 (삭제)
+        // capture groups가 모두 빈 문자열이면 결과도 빈 문자열이 됨
         return finalReplaceString;
     });
     

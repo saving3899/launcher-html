@@ -1059,9 +1059,16 @@ async function handleModelChange(panelContainer, apiProvider) {
         if (currentValue > maxContext) {
             contextSlider.value = maxContext;
             contextCounter.value = maxContext;
-            // 설정 저장
+            // 설정 저장 (apiProvider 보존)
             const updatedSettings = await SettingsStorage.load();
+            const preservedApiProvider = updatedSettings.apiProvider;
+            const preservedApiKeys = updatedSettings.apiKeys || {};
+            const preservedApiModels = updatedSettings.apiModels || {};
             updatedSettings[fieldMapping.contextField] = maxContext;
+            // apiProvider, apiKeys, apiModels 보존
+            updatedSettings.apiProvider = preservedApiProvider;
+            updatedSettings.apiKeys = { ...preservedApiKeys };
+            updatedSettings.apiModels = { ...preservedApiModels };
             await SettingsStorage.save(updatedSettings);
         }
     }
@@ -1069,91 +1076,98 @@ async function handleModelChange(panelContainer, apiProvider) {
 
 /**
  * 슬라이더와 숫자 입력 동기화
+ * number 인풋은 focus 상태에서 자유롭게 입력 가능하고, blur 시 range 제한 적용
  */
 function setupSliderSync(panelContainer) {
+    /**
+     * number 인풋과 range 슬라이더를 동기화하는 헬퍼 함수
+     * @param {HTMLElement} slider - range 슬라이더 요소
+     * @param {HTMLElement} counter - number 인풋 요소
+     * @param {boolean} isFloat - 소수점 값인지 여부 (소수점이면 .toFixed(2) 적용)
+     */
+    const syncSliderAndCounter = (slider, counter, isFloat = false) => {
+        if (!slider || !counter) return;
+        
+        // 슬라이더 변경 시 -> number 인풋 업데이트
+        slider.addEventListener('input', (e) => {
+            if (isFloat) {
+                counter.value = parseFloat(e.target.value).toFixed(2);
+            } else {
+                counter.value = e.target.value;
+            }
+        });
+        
+        // number 인풋 focus 시 -> 제한 없이 입력 가능하도록 (이벤트만 제거)
+        // number 인풋 blur 시 -> range 제한 적용 및 슬라이더 동기화
+        counter.addEventListener('blur', (e) => {
+            const inputValue = e.target.value;
+            let processedValue;
+            
+            if (isFloat) {
+                const numValue = parseFloat(inputValue) || 0;
+                processedValue = Math.max(parseFloat(slider.min), Math.min(parseFloat(slider.max), numValue));
+                // 소수점 처리
+                processedValue = parseFloat(processedValue.toFixed(2));
+                counter.value = processedValue.toFixed(2);
+            } else {
+                const numValue = parseInt(inputValue) || 0;
+                processedValue = Math.max(parseInt(slider.min), Math.min(parseInt(slider.max), numValue));
+                counter.value = processedValue;
+            }
+            
+            // 슬라이더도 업데이트
+            slider.value = processedValue;
+            
+            // change 이벤트를 트리거하여 저장 함수 호출
+            counter.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+    };
+    
     // 컨텍스트 크기
     const maxContextSlider = panelContainer.querySelector('#openai_max_context');
     const maxContextCounter = panelContainer.querySelector('#openai_max_context_counter');
-    if (maxContextSlider && maxContextCounter) {
-        maxContextSlider.addEventListener('input', (e) => {
-            maxContextCounter.value = e.target.value;
-        });
-        maxContextCounter.addEventListener('input', (e) => {
-            const value = Math.max(parseInt(maxContextSlider.min), Math.min(parseInt(maxContextSlider.max), parseInt(e.target.value) || 0));
-            maxContextSlider.value = value;
-            maxContextCounter.value = value;
-        });
-    }
+    syncSliderAndCounter(maxContextSlider, maxContextCounter, false);
     
     // 온도
     const tempSlider = panelContainer.querySelector('#temp_openai');
     const tempCounter = panelContainer.querySelector('#temp_counter_openai');
-    if (tempSlider && tempCounter) {
-        tempSlider.addEventListener('input', (e) => {
-            tempCounter.value = parseFloat(e.target.value).toFixed(2);
-        });
-        tempCounter.addEventListener('input', (e) => {
-            const value = Math.max(parseFloat(tempSlider.min), Math.min(parseFloat(tempSlider.max), parseFloat(e.target.value) || 0));
-            tempSlider.value = value;
-            tempCounter.value = value.toFixed(2);
-        });
-    }
+    syncSliderAndCounter(tempSlider, tempCounter, true);
     
     // Frequency Penalty
     const freqPenSlider = panelContainer.querySelector('#freq_pen_openai');
     const freqPenCounter = panelContainer.querySelector('#freq_pen_counter_openai');
-    if (freqPenSlider && freqPenCounter) {
-        freqPenSlider.addEventListener('input', (e) => {
-            freqPenCounter.value = parseFloat(e.target.value).toFixed(2);
-        });
-        freqPenCounter.addEventListener('input', (e) => {
-            const value = Math.max(parseFloat(freqPenSlider.min), Math.min(parseFloat(freqPenSlider.max), parseFloat(e.target.value) || 0));
-            freqPenSlider.value = value;
-            freqPenCounter.value = value.toFixed(2);
-        });
-    }
+    syncSliderAndCounter(freqPenSlider, freqPenCounter, true);
     
     // Presence Penalty
     const presPenSlider = panelContainer.querySelector('#pres_pen_openai');
     const presPenCounter = panelContainer.querySelector('#pres_pen_counter_openai');
-    if (presPenSlider && presPenCounter) {
-        presPenSlider.addEventListener('input', (e) => {
-            presPenCounter.value = parseFloat(e.target.value).toFixed(2);
-        });
-        presPenCounter.addEventListener('input', (e) => {
-            const value = Math.max(parseFloat(presPenSlider.min), Math.min(parseFloat(presPenSlider.max), parseFloat(e.target.value) || 0));
-            presPenSlider.value = value;
-            presPenCounter.value = value.toFixed(2);
-        });
-    }
+    syncSliderAndCounter(presPenSlider, presPenCounter, true);
     
     // Top K
     const topKSlider = panelContainer.querySelector('#top_k_openai');
     const topKCounter = panelContainer.querySelector('#top_k_counter_openai');
-    if (topKSlider && topKCounter) {
-        topKSlider.addEventListener('input', (e) => {
-            topKCounter.value = e.target.value;
-        });
-        topKCounter.addEventListener('input', (e) => {
-            const value = Math.max(parseInt(topKSlider.min), Math.min(parseInt(topKSlider.max), parseInt(e.target.value) || 0));
-            topKSlider.value = value;
-            topKCounter.value = value;
-        });
-    }
+    syncSliderAndCounter(topKSlider, topKCounter, false);
     
     // Top P
     const topPSlider = panelContainer.querySelector('#top_p_openai');
     const topPCounter = panelContainer.querySelector('#top_p_counter_openai');
-    if (topPSlider && topPCounter) {
-        topPSlider.addEventListener('input', (e) => {
-            topPCounter.value = parseFloat(e.target.value).toFixed(2);
-        });
-        topPCounter.addEventListener('input', (e) => {
-            const value = Math.max(parseFloat(topPSlider.min), Math.min(parseFloat(topPSlider.max), parseFloat(e.target.value) || 0));
-            topPSlider.value = value;
-            topPCounter.value = value.toFixed(2);
-        });
-    }
+    syncSliderAndCounter(topPSlider, topPCounter, true);
+    
+    // API별 동적 필드들도 처리 (data-source 속성을 가진 모든 number 인풋)
+    const dynamicNumberInputs = panelContainer.querySelectorAll('input[type="number"][data-source]');
+    dynamicNumberInputs.forEach((counter) => {
+        // 같은 id 패턴의 슬라이더 찾기 (예: openai_max_context_counter -> openai_max_context)
+        const sliderId = counter.id.replace(/_counter/, '');
+        const slider = panelContainer.querySelector(`#${sliderId}`);
+        if (slider && slider.type === 'range') {
+            // 소수점 필드인지 확인 (step이 0.01이거나 id에 'temp', 'pen', 'top_p' 등이 포함된 경우)
+            const isFloatField = counter.step === '0.01' || 
+                                counter.id.includes('temp') || 
+                                counter.id.includes('pen') || 
+                                counter.id.includes('top_p');
+            syncSliderAndCounter(slider, counter, isFloatField);
+        }
+    });
 }
 
 /**
@@ -1514,10 +1528,20 @@ async function saveGenerationSettings(panelContainer) {
     // SettingsStorage - 전역 스코프에서 사용
     const currentSettings = await SettingsStorage.load();
     
+    // API Provider를 현재 SettingsStorage에서 가져오기
+    // (사용자가 설정 모달에서 변경한 값이 여기에 저장되어 있음)
+    const apiProvider = currentSettings.apiProvider || 'openai';
+    const apiKeys = currentSettings.apiKeys || {};
+    const apiModels = currentSettings.apiModels || {};
+    
     const updatedSettings = { ...currentSettings };
     
-    // API Provider 확인
-    const apiProvider = updatedSettings.apiProvider || 'openai';
+    // 중요: apiProvider, apiKeys, apiModels는 현재 SettingsStorage 값 유지
+    // 프리셋 저장 시에는 이 값들이 프리셋에도 저장됨 (savePreset에서 filterPresetSettings 사용)
+    updatedSettings.apiProvider = apiProvider;
+    updatedSettings.apiKeys = { ...apiKeys };
+    updatedSettings.apiModels = { ...apiModels };
+    
     const fieldMapping = getApiFieldMapping(apiProvider);
     
     // 컨텍스트 크기 잠금 해제
@@ -2098,12 +2122,54 @@ async function applyPresetToUI(panelContainer, preset) {
  * data-source 속성에 따라 필드 표시/숨김 처리 (실리태번 방식)
  */
 function updateSourceFields(panelContainer, apiProvider) {
+    if (!panelContainer) {
+        console.warn('[updateSourceFields] panelContainer가 null입니다.');
+        return;
+    }
+    
+    if (!apiProvider) {
+        console.warn('[updateSourceFields] apiProvider가 없습니다.');
+        return;
+    }
+    
     const elements = panelContainer.querySelectorAll('[data-source]');
-    elements.forEach(element => {
-        const validSources = element.dataset.source.split(',');
+    
+    if (elements.length === 0) {
+        console.error('[updateSourceFields] data-source 속성을 가진 요소를 찾을 수 없습니다!', {
+            panelContainer: panelContainer,
+            innerHTMLLength: panelContainer.innerHTML?.length || 0,
+            id: panelContainer.id,
+            className: panelContainer.className
+        });
+        return;
+    }
+    
+    let visibleCount = 0;
+    let hiddenCount = 0;
+    
+    elements.forEach((element) => {
+        const dataSource = element.getAttribute('data-source');
+        if (!dataSource) {
+            return;
+        }
+        
+        const validSources = dataSource.split(',').map(s => s.trim());
         const shouldShow = validSources.includes(apiProvider);
-        element.style.display = shouldShow ? '' : 'none';
+        
+        if (shouldShow) {
+            element.style.display = '';
+            visibleCount++;
+        } else {
+            element.style.display = 'none';
+            hiddenCount++;
+        }
     });
+    
+    // 문제 발생 시에만 로그 출력
+    if (visibleCount === 0 && elements.length > 0) {
+        console.error('[updateSourceFields] 경고: 표시된 요소가 없습니다! API Provider:', apiProvider);
+        console.error('[updateSourceFields] 첫 번째 요소의 data-source:', elements[0]?.getAttribute('data-source'));
+    }
 }
 
 /**
@@ -2184,6 +2250,7 @@ function setupPresetEventListenersInPanel(panelContainer, manager) {
 }
 
 async function setupPromptsPanelEvents(panelContainer) {
+    // console.log 제거 - 너무 많은 로그 방지
     // 접기/펼치기 섹션 설정
     setupCollapsibleSections(panelContainer);
     
@@ -2227,16 +2294,33 @@ async function setupPromptsPanelEvents(panelContainer) {
     
     // 설정 로드
     // 프리셋이 있으면 프리셋 설정을 먼저 적용하고, 없으면 일반 설정 로드
+    let presetApiProvider = null; // 프리셋에 저장된 apiProvider (있다면)
+    
     if (shouldLoadPreset && presetToLoad) {
         try {
         // 프리셋 설정을 SettingsStorage에 먼저 적용 (프롬프트 포함)
         const currentSettings = await SettingsStorage.load();
-        const { prompts: presetPrompts, prompt_order: presetPromptOrder, ...presetSettingsWithoutPrompts } = presetToLoad;
+        const { prompts: presetPrompts, prompt_order: presetPromptOrder, apiProvider, apiKeys, apiModels, ...presetSettingsWithoutPrompts } = presetToLoad;
         
+        // 프리셋에 apiProvider가 있으면 SettingsStorage에도 저장하고 토스트 알림
+        if (apiProvider && apiProvider !== currentSettings.apiProvider) {
+            presetApiProvider = apiProvider;
+            // 토스트 알림 표시 (showToast는 전역 스코프에서 사용)
+            if (typeof showToast === 'function') {
+                showToast(`프리셋 "${presetToLoad.name || 'Default'}"의 API가 "${apiProvider}"로 변경되었습니다.`, 'info');
+            }
+        }
+        
+        // 프리셋에 저장된 apiProvider가 있으면 SettingsStorage에도 적용
         const mergedForLoad = {
             ...currentSettings,
             ...presetSettingsWithoutPrompts,
             preset_settings_openai: presetToLoad.name || 'Default',
+            // 프리셋에 apiProvider가 있으면 그것으로 변경, 없으면 현재 설정 유지
+            apiProvider: presetApiProvider || currentSettings.apiProvider,
+            // apiKeys와 apiModels는 프리셋에 있으면 사용, 없으면 현재 설정 유지
+            apiKeys: apiKeys || currentSettings.apiKeys,
+            apiModels: apiModels || currentSettings.apiModels,
         };
         
         // 프롬프트도 포함
@@ -2248,6 +2332,25 @@ async function setupPromptsPanelEvents(panelContainer) {
         }
         
         await SettingsStorage.save(mergedForLoad);
+        
+        // API Provider 변경 이벤트 발송 (설정 모달 등 다른 UI도 업데이트되도록)
+        if (presetApiProvider) {
+            window.dispatchEvent(new CustomEvent('api-provider-changed', { 
+                detail: { apiProvider: presetApiProvider } 
+            }));
+            
+            // 설정 모달의 select도 업데이트
+            const chatCompletionSourceSelect = document.getElementById('chat-completion-source');
+            if (chatCompletionSourceSelect && Array.from(chatCompletionSourceSelect.options).some(opt => opt.value === presetApiProvider)) {
+                chatCompletionSourceSelect.value = presetApiProvider;
+                // SettingsManager가 있다면 UI도 업데이트
+                if (window.settingsManager) {
+                    window.settingsManager.toggleProviderSpecificSettings();
+                    window.settingsManager.updateModelOptions();
+                }
+            }
+        }
+        
             presetAlreadyLoaded = true; // 프리셋 적용 완료
         } catch (error) {
             console.warn('프리셋 설정 저장 실패:', error);
@@ -2261,13 +2364,41 @@ async function setupPromptsPanelEvents(panelContainer) {
         await applyPresetToUI(panelContainer, presetToLoad);
     }
     
+    // API Provider 변경 감지 함수 정의 (반드시 사용 전에 정의)
+    const handleApiProviderChange = async () => {
+        // SettingsStorage는 이미 위에서 import됨
+        const settings = await SettingsStorage.load();
+        const apiProvider = settings.apiProvider || 'openai';
+        
+        // 필드 업데이트
+        if (panelContainer) {
+            updateSourceFields(panelContainer, apiProvider);
+            
+            // 컨텍스트 크기 업데이트도 함께 수행
+            await handleModelChange(panelContainer, apiProvider);
+        } else {
+            console.warn('[promptsTemplatesPanel.handleApiProviderChange] panelContainer가 null입니다.');
+        }
+    };
+    
     // API Provider에 따라 필드 표시/숨김 업데이트
-    const settingsAfterLoad = await SettingsStorage.load();
-    const apiProvider = settingsAfterLoad.apiProvider || 'openai';
-    updateSourceFields(panelContainer, apiProvider);
+    // 프리셋을 불러올 때는 프리셋에 저장된 apiProvider로 SettingsStorage가 이미 업데이트되었음
+    const currentSettingsAfterPreset = await SettingsStorage.load();
+    const apiProviderForFields = currentSettingsAfterPreset.apiProvider || 'openai';
+    
+    // 필드 업데이트 (중요: 모든 data-source 요소 표시/숨김)
+    // 패널이 열릴 때 반드시 호출되어야 함
+    if (panelContainer) {
+        updateSourceFields(panelContainer, apiProviderForFields);
+    } else {
+        console.error('[setupPromptsPanelEvents] panelContainer가 null입니다!');
+    }
     
     // 초기 모델 변경 핸들러 호출 (컨텍스트 크기 최대값 설정용)
-    await handleModelChange(panelContainer, apiProvider);
+    await handleModelChange(panelContainer, apiProviderForFields);
+    
+    // 프리셋을 불러올 때는 프리셋의 apiProvider로 SettingsStorage가 이미 업데이트되었고,
+    // 사용자가 설정 모달에서 API를 변경하면 api-provider-changed 이벤트를 통해 자동으로 업데이트됨
     
     // PresetManager 등록 (presetSelect는 위에서 이미 가져옴)
     if (presetSelect) {
@@ -2276,7 +2407,53 @@ async function setupPromptsPanelEvents(panelContainer) {
         // applyPresetSettings 오버라이드하여 UI에 적용
         const originalApplyPresetSettings = manager.applyPresetSettings.bind(manager);
         manager.applyPresetSettings = async (preset) => {
+            // 프리셋에 저장된 apiProvider 확인 (originalApplyPresetSettings 호출 전에)
+            const presetApiProviderFromPreset = preset?.apiProvider;
+            const currentSettingsBefore = await SettingsStorage.load();
+            const currentApiProviderBefore = currentSettingsBefore.apiProvider || 'openai';
+            
+            // originalApplyPresetSettings 호출 (이미 apiProvider를 저장했을 수 있음)
             await originalApplyPresetSettings(preset);
+            
+            // originalApplyPresetSettings 호출 후 SettingsStorage 다시 확인
+            const currentSettingsAfter = await SettingsStorage.load();
+            const currentApiProviderAfter = currentSettingsAfter.apiProvider || 'openai';
+            
+            // 프리셋에 저장된 apiProvider가 있고 변경되었으면 토스트 알림 및 UI 업데이트
+            if (presetApiProviderFromPreset && presetApiProviderFromPreset !== currentApiProviderBefore) {
+                // originalApplyPresetSettings에서 이미 저장했는지 확인
+                // 저장되었더라도 토스트와 UI 업데이트는 여기서 처리
+                
+                // 토스트 알림 표시
+                if (typeof showToast === 'function') {
+                    showToast(`프리셋 "${preset.name || 'Default'}"의 API가 "${presetApiProviderFromPreset}"로 변경되었습니다.`, 'info');
+                }
+                
+                // API Provider 변경 이벤트 발송 (설정 모달 등 다른 UI도 업데이트되도록)
+                window.dispatchEvent(new CustomEvent('api-provider-changed', { 
+                    detail: { apiProvider: presetApiProviderFromPreset } 
+                }));
+                
+                // 설정 모달의 select도 업데이트
+                const chatCompletionSourceSelect = document.getElementById('chat-completion-source');
+                if (chatCompletionSourceSelect && Array.from(chatCompletionSourceSelect.options).some(opt => opt.value === presetApiProviderFromPreset)) {
+                    chatCompletionSourceSelect.value = presetApiProviderFromPreset;
+                    // SettingsManager가 있다면 UI도 업데이트
+                    if (window.settingsManager) {
+                        window.settingsManager.toggleProviderSpecificSettings();
+                        window.settingsManager.updateModelOptions();
+                    }
+                }
+                
+                // 필드 업데이트 (프리셋의 apiProvider로)
+                updateSourceFields(panelContainer, presetApiProviderFromPreset);
+                await handleModelChange(panelContainer, presetApiProviderFromPreset);
+            } else {
+                // 프리셋에 apiProvider가 없거나 현재와 같으면 현재 설정으로 필드 업데이트
+                const apiProviderForFields = currentApiProviderAfter;
+                updateSourceFields(panelContainer, apiProviderForFields);
+                await handleModelChange(panelContainer, apiProviderForFields);
+            }
             
             // UI 업데이트는 항상 호출되도록 보장
             await applyPresetToUI(panelContainer, preset);
@@ -2827,25 +3004,57 @@ async function setupPromptsPanelEvents(panelContainer) {
             }
         }
         
-    // API Provider 변경 감지 (설정 모달에서 변경될 때)
-    // 전역 이벤트 리스너 추가 (설정 모달 외부에서도 작동)
-    const handleApiProviderChange = async () => {
-        // SettingsStorage는 이미 위에서 import됨
-        const settings = await SettingsStorage.load();
-        const apiProvider = settings.apiProvider || 'openai';
-        updateSourceFields(panelContainer, apiProvider);
-    };
-    
     // 설정 모달의 chat-completion-source select 변경 감지
     const chatCompletionSourceSelect = document.getElementById('chat-completion-source');
     if (chatCompletionSourceSelect) {
-        chatCompletionSourceSelect.addEventListener('change', async () => {
+        // 중복 등록 방지
+        if (!chatCompletionSourceSelect._hasPromptsChangeHandler) {
+            chatCompletionSourceSelect._hasPromptsChangeHandler = true;
+            chatCompletionSourceSelect.addEventListener('change', async () => {
+                // SettingsManager의 change 핸들러가 saveSettings를 호출하므로
+                // 여기서는 저장 후 바로 업데이트
+                // 짧은 지연을 주어 SettingsManager의 saveSettings가 완료되도록 함
+                await new Promise(resolve => setTimeout(resolve, 50));
+                await handleApiProviderChange();
+                // API 변경 시 모델도 다시 확인
+                const newSettings = await SettingsStorage.load();
+                const newApiProvider = newSettings.apiProvider || 'openai';
+                await handleModelChange(panelContainer, newApiProvider);
+            });
+        }
+    }
+    
+    // API Provider 변경 이벤트 감지 (설정 모달에서 변경될 때)
+    // 패널별로 독립적인 핸들러 사용 (여러 패널이 열릴 수 있음)
+    const apiProviderChangedHandler = async (event) => {
+        const apiProvider = event.detail?.apiProvider;
+        if (apiProvider) {
+            // 디버깅: API Provider 변경 확인
+            console.debug('[promptsTemplatesPanel] API Provider 변경됨:', apiProvider);
+            
+            // 짧은 지연을 주어 SettingsManager의 saveSettings가 완료되도록 함
+            await new Promise(resolve => setTimeout(resolve, 50));
+            
+            // 설정에서 최신 API Provider 확인 (이벤트 값과 다를 수 있음)
+            const settings = await SettingsStorage.load();
+            const actualApiProvider = settings.apiProvider || apiProvider;
+            
+            // 필드 업데이트
             await handleApiProviderChange();
-            // API 변경 시 모델도 다시 확인
-            const newSettings = await SettingsStorage.load();
-            const newApiProvider = newSettings.apiProvider || 'openai';
-            await handleModelChange(panelContainer, newApiProvider);
-        });
+            
+            // 디버깅: 필드 업데이트 후 확인
+            console.debug('[promptsTemplatesPanel] 필드 업데이트 완료, API Provider:', actualApiProvider);
+            
+            await handleModelChange(panelContainer, actualApiProvider);
+        }
+    };
+    
+    // 패널이 열릴 때마다 이벤트 리스너 등록 (패널별로 독립적으로)
+    window.addEventListener('api-provider-changed', apiProviderChangedHandler);
+    
+    // 패널이 닫힐 때 리스너 제거를 위한 참조 저장 (나중에 구현 가능)
+    if (!panelContainer._apiProviderChangedHandler) {
+        panelContainer._apiProviderChangedHandler = apiProviderChangedHandler;
     }
     
     // 모델 선택 변경 감지 (각 API Provider별)
@@ -2937,7 +3146,10 @@ async function setupPromptsPanelEvents(panelContainer) {
     // 모든 입력 필드에 변경 이벤트 리스너 추가
     // 컨텍스트 잠금 해제 체크박스는 loadGenerationSettings에서 이미 처리됨
     // SettingsStorage는 이미 함수 상단에서 import됨
-    const fieldMapping = getApiFieldMapping(apiProvider);
+    // 현재 API Provider 가져오기 (안전하게)
+    const settingsForFieldMapping = await SettingsStorage.load();
+    const currentApiProviderForFields = settingsForFieldMapping.apiProvider || 'openai';
+    const fieldMapping = getApiFieldMapping(currentApiProviderForFields);
     
     const allInputs = panelContainer.querySelectorAll('input[type="text"], input[type="number"], textarea, select, input[type="checkbox"], input[type="range"]');
     allInputs.forEach(input => {

@@ -274,6 +274,14 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
     const excludeStatusBarChoice = !statusBarChoiceEnabled; // 비활성화되어 있으면 제외
     
 
+    // API Provider와 모델에 맞는 최대 컨텍스트 크기 계산
+    // getMaxContextForModel - 전역 스코프에서 사용
+    const maxContextUnlocked = settings.max_context_unlocked || settings.oai_max_context_unlocked || false;
+    const configuredMaxContext = settings.openai_max_context || 4095;
+    const modelMaxContext = getMaxContextForModel(model, apiProvider, maxContextUnlocked);
+    // 설정값과 모델 최대값 중 더 작은 값 사용 (모델 한계를 초과하지 않도록)
+    const actualMaxContext = Math.min(configuredMaxContext, modelMaxContext);
+
     // prepareOpenAIMessages 호출
     let messages = null;
     try {
@@ -293,7 +301,7 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
             false, // dryRun = false
             promptManager,
             {
-                openai_max_context: settings.openai_max_context || 4095,
+                openai_max_context: actualMaxContext,
                 openai_max_tokens: settings.openai_max_tokens || 300,
                 temp_openai: settings.temp_openai || 1.0,
                 freq_pen_openai: settings.freq_pen_openai || 0.0,
@@ -318,6 +326,10 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
                 personality_format: settings.personality_format || '{{personality}}',
                 group_nudge_prompt: settings.group_nudge_prompt || '',
                 impersonation_prompt: settings.impersonation_prompt || '',
+                // API Provider와 모델 정보 전달 (컨텍스트 크기 계산용)
+                apiProvider: apiProvider,
+                model: model,
+                max_context_unlocked: settings.max_context_unlocked || settings.oai_max_context_unlocked || false,
             },
             finalTokenCountFn, // 실제 토큰 계산 함수 전달
             generateType // 생성 타입 전달

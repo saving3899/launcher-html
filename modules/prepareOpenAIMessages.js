@@ -121,8 +121,17 @@ async function prepareOpenAIMessages({
     // }
 
     const userSettings = promptManager.serviceSettings || {};
-    const maxContext = userSettings.openai_max_context || oaiSettings.openai_max_context || 4095;
+    let maxContext = userSettings.openai_max_context || oaiSettings.openai_max_context || 4095;
     const maxTokens = userSettings.openai_max_tokens || oaiSettings.openai_max_tokens || 300;
+    
+    // oaiSettings에서 apiProvider와 model 정보 가져오기 (있는 경우)
+    // getMaxContextForModel - 전역 스코프에서 사용
+    if (oaiSettings.apiProvider && oaiSettings.model) {
+        const maxContextUnlocked = oaiSettings.max_context_unlocked || oaiSettings.oai_max_context_unlocked || false;
+        const modelMaxContext = getMaxContextForModel(oaiSettings.model, oaiSettings.apiProvider, maxContextUnlocked);
+        // 설정값과 모델 최대값 중 더 작은 값 사용 (모델 한계를 초과하지 않도록)
+        maxContext = Math.min(maxContext, modelMaxContext);
+    }
     
     // tokenHandler 설정 (실리태번과 동일)
     if (promptManager && promptManager.tokenHandler) {

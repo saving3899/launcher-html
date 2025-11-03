@@ -34,13 +34,23 @@ class SettingsManager {
             }
         }
 
-        // Chat Completion Source 변경 시 UI 토글 및 모델 목록 업데이트
+        // Chat Completion Source 변경 시 UI 토글 및 모델 목록 업데이트, 설정 저장
         const chatCompletionSourceSelect = document.getElementById('chat-completion-source');
         if (chatCompletionSourceSelect) {
-            chatCompletionSourceSelect.addEventListener('change', () => {
-                this.toggleProviderSpecificSettings();
-                this.updateModelOptions();
-            });
+            // 중복 등록 방지를 위한 플래그
+            if (!chatCompletionSourceSelect._hasChangeHandler) {
+                chatCompletionSourceSelect._hasChangeHandler = true;
+                chatCompletionSourceSelect.addEventListener('change', async () => {
+                    this.toggleProviderSpecificSettings();
+                    this.updateModelOptions();
+                    // API 변경 시 설정 저장 (새로고침 후에도 유지되도록)
+                    await this.saveSettings();
+                    // 프롬프트 패널이 열려있으면 업데이트하도록 이벤트 발송
+                    window.dispatchEvent(new CustomEvent('api-provider-changed', { 
+                        detail: { apiProvider: chatCompletionSourceSelect.value } 
+                    }));
+                });
+            }
         }
 
         // Google Vertex AI Authentication Mode 변경 시 Express/Full 설정 토글
@@ -221,12 +231,13 @@ class SettingsManager {
             this.elements.settingsModal.removeEventListener('click', existingHandler);
         }
         
-        this.elements.settingsModal._clickHandler = (e) => {
+        this.elements.settingsModal._clickHandler = async (e) => {
             if (e.target.closest('.modal-content')) {
                 e.stopPropagation();
                 return;
             }
-            this.saveSettings();
+            // 모달 닫기 전에 설정 저장 (배경 클릭 시)
+            await this.saveSettings();
             this.closeSettingsModal();
         };
         this.elements.settingsModal.addEventListener('click', this.elements.settingsModal._clickHandler);
@@ -309,6 +320,7 @@ class SettingsManager {
      * 설정 로드
      */
     async loadSettings() {
+        // console.log 제거 - 너무 많은 로그 방지
         const settings = await SettingsStorage.load();
         
         // PresetManager 초기화 (OpenAI용)
@@ -316,11 +328,37 @@ class SettingsManager {
         
         const chatCompletionSourceSelect = document.getElementById('chat-completion-source');
         
+        if (!chatCompletionSourceSelect) {
+            return;
+        }
+        
         // Chat Completion Source 설정
         const provider = settings.apiProvider || 'openai';
-        if (chatCompletionSourceSelect) {
+        
+        // 저장된 provider 값이 select의 옵션에 있는지 확인
+        const optionExists = Array.from(chatCompletionSourceSelect.options).some(
+            option => option.value === provider
+        );
+        
+        // 저장된 값이 유효하면 select에 설정
+        if (optionExists) {
             chatCompletionSourceSelect.value = provider;
+        } else {
+            // 저장된 값이 유효하지 않으면 현재 select 값을 유지하고 경고만 표시
+            console.warn('[SettingsManager.loadSettings] 저장된 provider가 유효하지 않음:', provider, '현재 select 값 유지:', chatCompletionSourceSelect.value);
         }
+        
+        // UI 업데이트 (변경 이벤트는 트리거하지 않고 직접 호출)
+        // change 이벤트 트리거 시 saveSettings가 호출되어 무한 루프 가능
+        this.toggleProviderSpecificSettings();
+        this.updateModelOptions();
+        
+        // 프롬프트 패널 업데이트를 위한 이벤트 발송 (설정 로드 완료 후)
+        // 최종 select 값 사용
+        const finalProvider = chatCompletionSourceSelect.value;
+        window.dispatchEvent(new CustomEvent('api-provider-changed', { 
+            detail: { apiProvider: finalProvider } 
+        }));
 
         // 제공업체별 API 키 필드 ID 매핑 (실리태번 ID 형식)
         const providerKeyMap = {
@@ -568,12 +606,27 @@ class SettingsManager {
      * 설정 저장
      */
     async saveSettings() {
+        // console.log 제거 - 너무 많은 로그 방지
         const chatCompletionSourceSelect = document.getElementById('chat-completion-source');
         
         // 기존 설정 로드
         const currentSettings = await SettingsStorage.load();
         
-        const provider = chatCompletionSourceSelect ? chatCompletionSourceSelect.value : 'openai';
+        // Chat Completion Source 값 읽기 (select가 없거나 값이 비어있으면 기존 저장된 값 유지)
+        let provider = currentSettings.apiProvider || 'openai'; // 기본값을 기존 저장된 값으로
+        if (chatCompletionSourceSelect) {
+            const selectedValue = chatCompletionSourceSelect.value;
+            if (selectedValue) {
+                provider = selectedValue;
+            } else {
+                // select 값이 비어있으면 기존 저장된 값 사용
+                provider = currentSettings.apiProvider || 'openai';
+            }
+        } else {
+            // select 요소가 없으면 기존 저장된 값 사용
+            provider = currentSettings.apiProvider || 'openai';
+            console.warn('[SettingsManager.saveSettings] select 요소를 찾을 수 없음, 기존 값 사용:', provider);
+        }
         
         // 제공업체별 API 키 필드 ID 매핑 (실리태번 ID 형식)
         const providerKeyMap = {
@@ -703,8 +756,33 @@ class SettingsManager {
             apiModels: apiModels,
         };
         
+        // 저장할 설정 확인 제거 (불필요한 로그)
+        
         // IndexedDB에 설정 저장
-        await SettingsStorage.save(settings);
+        try {
+            await SettingsStorage.save(settings);
+            console.log('[SettingsManager.saveSettings] 저장 완료, apiProvider:', provider);
+            
+            // 저장 확인을 위한 재로드 및 검증
+            const savedSettings = await SettingsStorage.load();
+            if (savedSettings.apiProvider !== provider) {
+                console.error('[SettingsManager.saveSettings] 저장 검증 실패:', {
+                    저장시도: provider,
+                    저장후: savedSettings.apiProvider
+                });
+                // 재시도
+                await SettingsStorage.save(settings);
+                const retrySettings = await SettingsStorage.load();
+                if (retrySettings.apiProvider !== provider) {
+                    console.error('[SettingsManager.saveSettings] 재시도 후에도 실패');
+                } else {
+                    console.log('[SettingsManager.saveSettings] 재시도 후 저장 성공');
+                }
+            }
+        } catch (error) {
+            console.error('[SettingsManager.saveSettings] 저장 중 오류:', error);
+            throw error;
+        }
     }
 
     /**

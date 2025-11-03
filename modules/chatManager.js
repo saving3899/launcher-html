@@ -1269,6 +1269,7 @@ class ChatManager {
         let generateType = 'normal';
         let shouldAddUserMessage = false;
         let userMessageToSend = text || '';
+        let processedUserMessage = ''; // 정규식 적용된 사용자 메시지
         
         if (!text) {
             // 입력창이 비어있을 때
@@ -1296,7 +1297,9 @@ class ChatManager {
                 
                 if (sendIfEmpty && sendIfEmpty.trim()) {
                     // send_if_empty가 있으면 그 값을 사용자 메시지로 사용
-                    userMessageToSend = sendIfEmpty.trim();
+                    // 정규식 적용
+                    processedUserMessage = await getRegexedString(sendIfEmpty.trim(), REGEX_PLACEMENT.USER_INPUT);
+                    userMessageToSend = processedUserMessage;
                     shouldAddUserMessage = true;
                     generateType = 'normal';
                 } else {
@@ -1307,18 +1310,19 @@ class ChatManager {
                 }
             }
         } else {
-            // 입력창에 텍스트가 있을 때: 기존대로 유저 메시지 추가
+            // 입력창에 텍스트가 있을 때: 정규식 적용 후 유저 메시지 추가
+            // 정규식 적용 (사용자 입력) - 실리태번과 동일: sendMessageAsUser 함수 참고
+            // 옵션을 전달하지 않으므로 isMarkdown과 isPrompt는 undefined가 됨
+            // 따라서 markdownOnly와 promptOnly가 모두 false인 스크립트가 적용됨 (직접 편집)
+            // getRegexedString, REGEX_PLACEMENT - 전역 스코프에서 사용
+            processedUserMessage = await getRegexedString(text, REGEX_PLACEMENT.USER_INPUT);
+            userMessageToSend = processedUserMessage;
             shouldAddUserMessage = true;
             generateType = 'normal';
         }
 
         // 유저 메시지 추가 (필요한 경우에만)
         if (shouldAddUserMessage) {
-            // 정규식 적용 (사용자 입력) - 실리태번과 동일: sendMessageAsUser 함수 참고
-            // 옵션을 전달하지 않으므로 isMarkdown과 isPrompt는 undefined가 됨
-            // 따라서 markdownOnly와 promptOnly가 모두 false인 스크립트가 적용됨
-            // getRegexedString, REGEX_PLACEMENT - 전역 스코프에서 사용
-            const processedText = await getRegexedString(text, REGEX_PLACEMENT.USER_INPUT);
 
             // 현재 페르소나 아바타 가져오기 (실리태번과 동일)
             let userAvatar = null;
@@ -1334,9 +1338,9 @@ class ChatManager {
             }
             
             // 사용자 메시지 추가 (페르소나 아바타 포함)
-            // 중요: addMessage의 첫 번째 인자는 정규식 적용 전 원본 텍스트여야 함 (dataset.originalText로 저장됨)
-            // generateAIResponse에서 userMessage와 비교할 때 원본 텍스트와 비교해야 하므로 text를 전달
-            await this.addMessage(text, 'user', null, null, [], 0, userAvatar);
+            // 중요: 정규식으로 처리된 텍스트를 전달 (직접 편집 정규식 적용 후)
+            // addMessage 내부에서는 표시용으로 추가 정규식 적용 (markdownOnly 정규식 등)
+            await this.addMessage(processedUserMessage, 'user', null, null, [], 0, userAvatar);
 
             // DOM 업데이트 완료 대기 (addMessage 후 DOM이 반영될 시간 확보)
             await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
