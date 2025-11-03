@@ -1,0 +1,549 @@
+/* 프롬프트 매니저 스타일 (실리태번 기반) */
+
+/* 프롬프트 편집 팝업 - 실리태번과 동일한 구조 */
+#completion_prompt_manager_popup {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
+    z-index: 3010 !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-md);
+    background: rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    pointer-events: none;
+    animation: overlayFadeIn 0.2s ease;
+}
+
+#completion_prompt_manager_popup.hidden {
+    display: none !important;
+    pointer-events: none !important;
+}
+
+/* 모달 콘텐츠 */
+#completion_prompt_manager_popup .modal-content {
+    pointer-events: auto;
+    background: var(--bg-secondary);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    width: 100%;
+    max-width: 600px;
+    max-height: calc(100dvh - 2 * var(--spacing-md));
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+/* Edit/Inspect 영역 */
+#completion_prompt_manager_popup #completion_prompt_manager_popup_edit,
+#completion_prompt_manager_popup #completion_prompt_manager_popup_chathistory_edit,
+#completion_prompt_manager_popup #completion_prompt_manager_popup_dialogueexamples_edit,
+#completion_prompt_manager_popup #completion_prompt_manager_popup_inspect {
+    display: none;
+    padding: var(--spacing-lg);
+    flex: 1;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+#completion_prompt_manager_popup #completion_prompt_manager_popup_edit {
+    display: flex;
+}
+
+/* Edit/Inspect 제목 */
+#completion_prompt_manager_popup_edit h3,
+#completion_prompt_manager_popup_inspect h3 {
+    margin: 0 0 var(--spacing-lg) 0;
+    font-size: 1.25em;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* 엔트리 영역 */
+#completion_prompt_manager_popup .completion_prompt_manager_popup_entry {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+/* 폼 */
+#completion_prompt_manager_popup .completion_prompt_manager_popup_entry_form {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+    min-height: 0;
+}
+
+/* Select2 컨테이너 */
+.completion_prompt_manager_popup_entry_form .select2-container {
+    margin: 0;
+    width: 100% !important;
+}
+
+/* 폼 컨트롤 */
+.completion_prompt_manager_popup_entry_form_control {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.completion_prompt_manager_popup_entry_form_control label {
+    font-size: 0.9em;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.completion_prompt_manager_popup_entry_form_control label span {
+    display: block;
+}
+
+/* 인라인 레이아웃 (Name+Role, Triggers+Position) */
+.completion_prompt_manager_popup_entry_form_control.flex-container {
+    display: flex;
+    flex-direction: row;
+    gap: var(--spacing-md);
+    align-items: flex-start;
+}
+
+.completion_prompt_manager_popup_entry_form_control.flex-container > .completion_prompt_manager_popup_entry_form_control {
+    flex: 1;
+    min-width: 0;
+}
+
+/* 프롬프트 텍스트 영역 (큰 영역) */
+#completion_prompt_manager_popup .completion_prompt_manager_popup_entry_form_control:has(#completion_prompt_manager_popup_entry_form_prompt) {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 200px;
+}
+
+#completion_prompt_manager_popup #completion_prompt_manager_popup_entry_form_prompt {
+    flex: 1;
+    min-height: 200px;
+    resize: vertical;
+    font-size: 0.9em;
+    line-height: 1.5;
+}
+
+/* Prompt 레이블과 체크박스 */
+#completion_prompt_manager_popup .completion_prompt_manager_popup_entry_form_control > .flex-container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-xs);
+}
+
+/* 체크박스 레이블 */
+#completion_prompt_manager_popup .checkbox_label {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    margin: 0;
+    cursor: pointer;
+}
+
+/* 소스 블록 */
+#completion_prompt_manager_popup_entry_source_block {
+    display: flex;
+    justify-content: center;
+    margin-top: var(--spacing-xs);
+    margin-bottom: var(--spacing-xs);
+}
+
+#completion_prompt_manager_popup_entry_source_block .text_muted {
+    font-size: 0.85em;
+    color: var(--text-tertiary);
+}
+
+/* Inspect 영역 */
+#completion_prompt_manager_popup #completion_prompt_manager_popup_inspect {
+    display: flex;
+}
+
+#completion_prompt_manager_popup #completion_prompt_manager_popup_inspect .completion_prompt_manager_popup_entry {
+    padding: 0;
+}
+
+#completion_prompt_manager_popup #completion_prompt_manager_popup_entry_form_inspect_list {
+    margin-top: var(--spacing-md);
+}
+
+#completion_prompt_manager_popup .completion_prompt_manager_prompt {
+    margin: var(--spacing-md) 0;
+    padding: var(--spacing-md);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-md);
+    background: var(--bg-primary);
+}
+
+/* 팝업 헤더 */
+#completion_prompt_manager_popup .completion_prompt_manager_popup_header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-md);
+}
+
+#completion_prompt_manager_popup #completion_prompt_manager_popup_close_button {
+    font-size: 1.2em;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    cursor: pointer;
+    border-radius: var(--border-radius-sm);
+    transition: all 0.2s ease;
+    line-height: 1;
+}
+
+#completion_prompt_manager_popup #completion_prompt_manager_popup_close_button:hover {
+    background: var(--bg-tertiary);
+}
+
+/* 폼 푸터 (버튼들) */
+#completion_prompt_manager_popup .completion_prompt_manager_popup_entry .completion_prompt_manager_popup_entry_form_footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-lg);
+    padding-top: var(--spacing-md);
+    border-top: 1px solid var(--border-color);
+}
+
+#completion_prompt_manager_popup .completion_prompt_manager_popup_entry_form_footer button {
+    font-size: 1em;
+    padding: var(--spacing-sm) var(--spacing-lg);
+    min-width: 80px;
+}
+
+#completion_prompt_manager_popup .completion_prompt_manager_popup_entry_form_footer #completion_prompt_manager_popup_entry_form_close,
+#completion_prompt_manager_popup .completion_prompt_manager_popup_entry_form_footer #completion_prompt_manager_popup_entry_form_reset,
+#completion_prompt_manager_popup .completion_prompt_manager_popup_entry_form_footer #completion_prompt_manager_popup_entry_form_save {
+    font-size: 1em;
+    padding: var(--spacing-sm) var(--spacing-lg);
+}
+
+#prompt-manager-reset-character,
+#completion_prompt_manager_popup .completion_prompt_manager_popup_entry_form_footer #completion_prompt_manager_popup_entry_form_reset {
+    color: rgb(220, 173, 16);
+}
+
+/* 입력 필드 개선 */
+#completion_prompt_manager_popup .text-input,
+#completion_prompt_manager_popup .text_pole {
+    width: 100%;
+}
+
+/* Depth/Order 행 */
+#completion_prompt_manager_depth_order_row {
+    display: flex;
+    gap: var(--spacing-md);
+}
+
+#completion_prompt_manager_depth_order_row .completion_prompt_manager_popup_entry_form_control {
+    flex: 1;
+    min-width: 0;
+}
+
+/* ========================================
+   프롬프트 리스트 스타일 (깔끔한 디자인)
+   ======================================== */
+
+/* 프롬프트 리스트 컨테이너 */
+#completion_prompt_manager_list,
+.completion_prompt_manager_list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    margin-top: var(--spacing-md) !important;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-md);
+    overflow: hidden;
+}
+
+/* 리스트 헤더 */
+.completion_prompt_manager_list_head {
+    display: grid !important;
+    grid-template-columns: 1fr auto 60px !important;
+    padding: var(--spacing-md) var(--spacing-lg) !important;
+    padding-left: 30px !important;
+    font-weight: 600 !important;
+    font-size: 13px !important;
+    color: var(--text-secondary) !important;
+    background: var(--bg-tertiary) !important;
+    border-bottom: 1px solid var(--border-color) !important;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    align-items: center !important;
+    margin: 0 !important;
+    gap: var(--spacing-xs) !important;
+}
+
+/* 리스트 구분선 */
+.completion_prompt_manager_list_separator {
+    margin: 0 !important;
+    padding: 0 !important;
+    list-style: none !important;
+}
+
+.completion_prompt_manager_list_separator hr {
+    margin: 0 !important;
+    border: none !important;
+    border-top: 1px solid var(--border-color) !important;
+    opacity: 0.5;
+}
+
+/* 프롬프트 리스트 항목 */
+.completion_prompt_manager_prompt {
+    display: grid !important;
+    grid-template-columns: 1fr auto 60px !important;
+    padding: var(--spacing-md) var(--spacing-lg) !important;
+    margin: 0 !important;
+    min-height: 52px !important;
+    border-bottom: 1px solid var(--border-color) !important;
+    align-items: center !important;
+    background: var(--bg-secondary) !important;
+    transition: all var(--transition-fast) !important;
+    cursor: move !important;
+    position: relative !important;
+}
+
+/* 드래그 핸들 (absolute positioning) */
+.completion_prompt_manager_prompt:has(.drag-handle.ui-sortable-handle) {
+    padding-left: 30px !important;
+}
+
+.completion_prompt_manager_prompt .drag-handle {
+    position: absolute !important;
+    left: 5px !important;
+    top: 0 !important;
+    height: 100% !important;
+    width: 24px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    color: var(--text-tertiary) !important;
+    cursor: grab !important;
+    flex-shrink: 0;
+}
+
+.completion_prompt_manager_prompt .drag-handle:not(.ui-sortable-handle) {
+    display: none !important;
+}
+
+.drag-handle:active {
+    cursor: grabbing !important;
+}
+
+.drag-handle i {
+    font-size: 14px !important;
+}
+
+.completion_prompt_manager_prompt.ui-sortable-helper {
+    cursor: grabbing !important;
+    opacity: 0.8 !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
+    margin: 0 !important;
+}
+
+/* 리스트 컨테이너 position 확인 */
+#completion_prompt_manager_list,
+#completion_prompt_manager_list.ui-sortable {
+    position: relative !important;
+}
+
+.completion_prompt_manager_prompt:last-child {
+    border-bottom: none !important;
+}
+
+.completion_prompt_manager_prompt:hover {
+    background: var(--bg-primary) !important;
+}
+
+/* 비활성화된 프롬프트 */
+.completion_prompt_manager_prompt_disabled {
+    opacity: 0.5 !important;
+}
+
+/* 프롬프트 이름 */
+.completion_prompt_manager_prompt_name {
+    display: flex !important;
+    align-items: center !important;
+    gap: var(--spacing-xs) !important;
+    font-size: 14px !important;
+    color: var(--text-primary) !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.completion_prompt_manager_prompt_name i {
+    font-size: 12px !important;
+    color: var(--text-tertiary) !important;
+    flex-shrink: 0;
+}
+
+/* 프롬프트 컨트롤 영역 */
+.prompt_manager_prompt_controls {
+    display: flex !important;
+    gap: var(--spacing-sm) !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    flex-shrink: 0;
+}
+
+.prompt-manager-toggle-action,
+.prompt-manager-edit-action,
+.prompt-manager-inspect-action {
+    cursor: pointer !important;
+    color: var(--text-secondary) !important;
+    font-size: 16px !important;
+    transition: all var(--transition-fast) !important;
+    padding: var(--spacing-xs) !important;
+    border-radius: var(--border-radius-sm) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 28px !important;
+    height: 28px !important;
+}
+
+.prompt-manager-toggle-action:hover,
+.prompt-manager-edit-action:hover,
+.prompt-manager-inspect-action:hover {
+    background: var(--bg-tertiary) !important;
+    color: var(--accent-green) !important;
+}
+
+.prompt-manager-toggle-action.fa-toggle-on {
+    color: var(--accent-green) !important;
+}
+
+.prompt-manager-toggle-action.fa-toggle-off {
+    color: var(--text-tertiary) !important;
+}
+
+/* 토큰 영역 */
+.prompt_manager_prompt_tokens {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    font-size: 12px !important;
+    color: var(--text-tertiary) !important;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace !important;
+    flex-shrink: 0;
+}
+
+/* 프롬프트 매니저 Footer 버튼 스타일 */
+.completion_prompt_manager_footer,
+[class*="prompt_manager_footer"] {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: center;
+    flex-wrap: nowrap;
+}
+
+.completion_prompt_manager_footer .menu_button,
+[class*="prompt_manager_footer"] .menu_button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    margin: 0;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    color: var(--text-primary);
+    font-size: 14px;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+    box-sizing: border-box;
+}
+
+.completion_prompt_manager_footer .menu_button:hover,
+[class*="prompt_manager_footer"] .menu_button:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-green);
+    color: var(--accent-green);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.completion_prompt_manager_footer .menu_button:active,
+[class*="prompt_manager_footer"] .menu_button:active {
+    transform: translateY(0);
+}
+
+.completion_prompt_manager_footer .menu_button.caution,
+[class*="prompt_manager_footer"] .menu_button.caution {
+    color: var(--accent-red, #f44336);
+}
+
+.completion_prompt_manager_footer .menu_button.caution:hover,
+[class*="prompt_manager_footer"] .menu_button.caution:hover {
+    background: rgba(244, 67, 54, 0.1);
+    border-color: var(--accent-red, #f44336);
+    color: var(--accent-red, #f44336);
+}
+
+/* 반응형 디자인 */
+@media screen and (max-width: 768px) {
+    #completion_prompt_manager_popup .modal-content {
+        max-width: 95vw;
+        max-height: calc(100dvh - 2 * var(--spacing-md));
+    }
+    
+    .completion_prompt_manager_popup_entry_form_control.flex-container {
+        flex-direction: column;
+    }
+    
+    .completion_prompt_manager_popup_entry_form_control.flex-container > .completion_prompt_manager_popup_entry_form_control {
+        flex: 1 1 100%;
+    }
+    
+    .completion_prompt_manager_prompt {
+        grid-template-columns: 1fr auto 50px !important;
+        padding: var(--spacing-sm) var(--spacing-md) !important;
+        padding-left: 28px !important;
+    }
+    
+    .completion_prompt_manager_list_head {
+        grid-template-columns: 1fr auto 50px !important;
+        padding-left: 28px !important;
+    }
+    
+    .completion_prompt_manager_prompt .drag-handle {
+        width: 20px !important;
+        left: 4px !important;
+    }
+    
+    .prompt_manager_prompt_tokens {
+        font-size: 11px !important;
+    }
+}
+
+@keyframes overlayFadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}

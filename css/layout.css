@@ -1,0 +1,494 @@
+/* 레이아웃 관련 스타일 */
+
+/* 상단 바 */
+.top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-md);
+    height: var(--top-bar-height);
+    background: var(--bg-secondary);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border-color);
+    padding: 0 var(--spacing-md);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    position: relative;
+}
+
+.top-bar-btn-wrap {
+    max-width: 768px;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.menu-toggle {
+    background: transparent;
+    border: none;
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+    padding: var(--spacing-md);
+    color: var(--text-primary);
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+    border-radius: var(--border-radius-sm);
+}
+
+.menu-toggle:hover {
+    background: var(--bg-tertiary);
+    border-radius: var(--border-radius-sm);
+}
+
+.top-bar-right {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    flex-shrink: 0;
+}
+
+.home-btn {
+    flex-shrink: 0;
+}
+
+/* 홈 버튼은 기본적으로 표시, 홈 화면 모드일 때만 숨김 */
+/* 필요 시 display: none; 추가 가능 */
+
+.top-bar-btn {
+    background: transparent;
+    border: none;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: var(--spacing-sm);
+    color: var(--text-primary);
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    border-radius: var(--border-radius-sm);
+}
+
+.top-bar-btn:hover {
+    background: var(--bg-tertiary);
+    border-radius: var(--border-radius-sm);
+}
+
+.char-info {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-width: 0;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    height: 100%;
+}
+
+.char-name-text {
+    /* 폰트 스타일 */
+    font-size: 20px;
+    font-weight: 700;
+    text-align: center;
+    letter-spacing: -0.3px;
+    color: var(--text-primary);
+    cursor: default;
+    margin: 0;
+    padding: 0 var(--spacing-3xl);
+    
+    /* 텍스트 처리 */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    
+    /* 레이아웃 및 애니메이션 */
+    transition: opacity var(--transition-fast);
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.char-info-buttons {
+    gap: var(--spacing-md);
+    align-items: center;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    
+    /* 초기 상태: 투명하고 클릭 불가 */
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    
+    /* fade in 애니메이션 */
+    transition: opacity var(--transition-fast), visibility var(--transition-fast);
+    transition-delay: 0s;
+}
+
+.char-info:hover .char-name-text {
+    opacity: 0;
+    transition-delay: 0s;
+}
+
+.char-info:hover .char-info-buttons {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    /* char-name-text가 사라진 후 나타나도록 약간의 지연 */
+    transition-delay: calc(var(--transition-fast) * 0.5);
+}
+
+.char-info-btn {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    color: var(--text-primary);
+    cursor: pointer;
+    padding: var(--spacing-sm);
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+}
+
+.char-info-btn:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-green);
+    color: var(--accent-green);
+}
+
+.char-info-btn:active {
+    transform: scale(0.95);
+}
+
+.home-info {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-width: 0;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    height: 100%;
+}
+
+.home-info span {
+    font-size: 20px;
+    font-weight: 700;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    letter-spacing: -0.3px;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: color var(--transition-fast);
+    margin: 0;
+    padding: 0 var(--spacing-3xl);
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.home-info span:hover {
+    color: var(--accent-green);
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+    padding: var(--spacing-sm);
+    color: var(--text-primary);
+    transition: all var(--transition-fast);
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.close-btn:hover {
+    background: var(--bg-tertiary);
+    border-radius: var(--border-radius-sm);
+}
+
+/* #char-name은 .char-name-text로 통합됨 (HTML에서 둘 다 같은 요소에 적용됨) */
+
+/* 메인 콘텐츠 영역 */
+.main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    max-width: 768px;
+    width: 100%;
+    margin: 0 auto;
+}
+
+/* 홈화면 영역 (캐릭터 미선택 상태) */
+.home-screen {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: transparent;
+}
+
+.home-screen.hidden {
+    display: none;
+}
+
+/* 채팅 컨테이너 */
+#chat-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: transparent;
+}
+
+#chat-container.hidden {
+    display: none;
+}
+
+/* 채팅 메시지 영역 (스크롤 가능) */
+#chat-container > #chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xl);
+    padding: var(--spacing-xl) var(--spacing-lg);
+}
+
+/* 채팅 입력 컨테이너 (하단 고정) */
+.chat-input-container {
+    flex-shrink: 0;
+    display: none; /* 기본적으로 숨김 */
+    align-items: flex-end;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+    /* background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color); */
+    z-index: 10;
+}
+
+.chat-input-container.visible {
+    display: flex;
+}
+
+/* 패널 컨테이너 */
+.panel-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 250;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-lg);
+}
+
+/* 환영 메시지 */
+.welcome-message {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+.welcome-message p {
+    font-size: 18px;
+    opacity: 0.7;
+    font-weight: 400;
+    letter-spacing: 0.3px;
+}
+
+/* 입력 영역 */
+#input-area {
+    background: var(--bg-secondary);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid var(--border-color);
+    padding: var(--spacing-lg);
+    position: sticky;
+    bottom: 0;
+    z-index: 100;
+    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05);
+}
+
+#quick-reply-container {
+    display: flex;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+    overflow-x: auto;
+    padding-bottom: var(--spacing-xs);
+}
+
+#input-form {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--spacing-md);
+}
+
+/* 사이드 메뉴 */
+#side-menu {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 320px;
+    height: 100vh;
+    height: 100dvh;
+    background: var(--bg-secondary);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-left: 1px solid var(--border-color);
+    z-index: 200;
+    transition: transform var(--transition-normal);
+    box-shadow: var(--shadow-lg);
+    display: block;
+}
+
+#side-menu.hidden {
+    transform: translateX(100%);
+    visibility: hidden;
+    pointer-events: none; /* hidden일 때 클릭 불가 */
+}
+
+#side-menu.closing {
+    transform: translateX(100%);
+    pointer-events: none;
+}
+
+#side-menu:not(.hidden):not(.closing) {
+    transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto; /* 보일 때 클릭 가능 */
+}
+
+.side-menu-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-md);
+    border-bottom: 1px solid var(--border-color);
+    height: var(--top-bar-height);
+}
+
+.side-menu-header h2 {
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.side-menu-content {
+    display: flex;
+    flex-direction: column;
+    padding: var(--spacing-sm);
+    overflow-y: auto;
+    flex: 1;
+}
+
+/* 메뉴 그룹 (서브 메뉴가 있는 항목) */
+.menu-group {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 600;
+}
+
+.menu-arrow {
+    font-size: 12px;
+    transition: transform var(--transition-fast);
+    color: var(--text-secondary);
+}
+
+/* 서브 메뉴 컨테이너 */
+.menu-submenu {
+    padding-left: var(--spacing-lg);
+    margin-top: var(--spacing-xs);
+    margin-bottom: var(--spacing-xs);
+    border-left: 2px solid var(--border-color);
+    transition: all var(--transition-fast);
+}
+
+/* 서브 메뉴 아이템 */
+.menu-subitem {
+    font-weight: 400;
+    font-size: 15px;
+    padding-left: var(--spacing-md);
+}
+
+.menu-item {
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    padding: var(--spacing-lg);
+    text-align: left;
+    border-radius: var(--border-radius-sm);
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 500;
+    transition: all var(--transition-fast);
+    margin-bottom: var(--spacing-xs);
+    position: relative;
+    width: 100%;
+    display: block;
+}
+
+.menu-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 0;
+    background: var(--accent-yellow);
+    border-radius: 0 3px 3px 0;
+    transition: height var(--transition-fast);
+}
+
+.menu-item:hover {
+    background: var(--bg-tertiary);
+}
+
+.menu-item:hover::before {
+    height: 60%;
+}
+

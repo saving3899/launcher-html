@@ -1,0 +1,822 @@
+/* 프롬프트 패널 스타일 (일관성 있는 디자인) */
+
+/* 패널 모달 내부 */
+#panel-modal-container .modal-content {
+    max-width: 800px;
+}
+
+#panel-modal-container .modal-body {
+    padding: var(--spacing-xl);
+}
+
+/* 설정 섹션 */
+#panel-modal-container .settings-section {
+    margin-bottom: var(--spacing-2xl);
+}
+
+#panel-modal-container .settings-section:last-child {
+    margin-bottom: 0;
+}
+
+#panel-modal-container .settings-section h3 {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: var(--spacing-lg);
+    color: var(--text-primary);
+}
+
+#panel-modal-container .settings-section h4 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: var(--spacing-lg) 0 var(--spacing-md) 0;
+    color: var(--text-primary);
+}
+
+/* Preset 관리 헤더 */
+#panel-modal-container .settings-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-md);
+}
+
+#panel-modal-container .settings-section-header h3 {
+    margin: 0;
+    flex: 1;
+}
+
+#panel-modal-container .settings-section-header .icon-btn-group {
+    display: flex;
+    gap: var(--spacing-xs);
+}
+
+/* Preset 선택 영역 */
+#panel-modal-container .preset-select-group {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: center;
+}
+
+#panel-modal-container .preset-select-group .text-input {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Flex Container - 줄바꿈 및 간격 개선 */
+#panel-modal-container .flex-container {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+}
+
+#panel-modal-container .flex-container.flex-wrap {
+    flex-wrap: wrap;
+}
+
+#panel-modal-container .flex-container.align-items-center {
+    align-items: center;
+}
+
+#panel-modal-container .flex-container.align-items-start {
+    align-items: flex-start;
+}
+
+#panel-modal-container .flex1 {
+    flex: 1;
+    min-width: 0;
+}
+
+/* ========================================
+   입력 요소 스타일 (깔끔하고 예쁜 디자인)
+   ======================================== */
+
+/* Select 드롭다운 */
+#panel-modal-container select,
+#panel-modal-container select.text-input {
+    width: 100%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    padding: var(--spacing-md) var(--spacing-lg);
+    padding-right: 40px;
+    color: var(--text-primary);
+    font-size: 16px; /* iOS에서 자동 확대 방지 (16px 이상 필요) */
+    font-family: inherit;
+    transition: all var(--transition-fast);
+    box-sizing: border-box;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right var(--spacing-md) center;
+    background-size: 12px;
+}
+
+#panel-modal-container select:hover {
+    border-color: var(--accent-green);
+    background-color: var(--bg-primary);
+}
+
+#panel-modal-container select:focus {
+    outline: none;
+    border-color: var(--accent-green);
+    background-color: var(--bg-secondary);
+    box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+}
+
+#panel-modal-container select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: var(--bg-tertiary);
+}
+
+/* Input 필드 (텍스트, 숫자) */
+#panel-modal-container input[type="text"],
+#panel-modal-container input[type="number"],
+#panel-modal-container input[type="email"],
+#panel-modal-container input[type="password"],
+#panel-modal-container .text-input {
+    width: 100%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    padding: var(--spacing-md) var(--spacing-lg);
+    color: var(--text-primary);
+    font-size: 16px; /* iOS에서 자동 확대 방지 (16px 이상 필요) */
+    font-family: inherit;
+    transition: all var(--transition-fast);
+    box-sizing: border-box;
+}
+
+#panel-modal-container input[type="text"]:hover,
+#panel-modal-container input[type="number"]:hover,
+#panel-modal-container input[type="email"]:hover,
+#panel-modal-container input[type="password"]:hover,
+#panel-modal-container .text-input:hover {
+    border-color: var(--accent-green);
+    background-color: var(--bg-primary);
+}
+
+#panel-modal-container input[type="text"]:focus,
+#panel-modal-container input[type="number"]:focus,
+#panel-modal-container input[type="email"]:focus,
+#panel-modal-container input[type="password"]:focus,
+#panel-modal-container .text-input:focus {
+    outline: none;
+    border-color: var(--accent-green);
+    background-color: var(--bg-secondary);
+    box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+}
+
+#panel-modal-container input[type="text"]::placeholder,
+#panel-modal-container input[type="number"]::placeholder,
+#panel-modal-container input[type="email"]::placeholder,
+#panel-modal-container input[type="password"]::placeholder,
+#panel-modal-container .text-input::placeholder {
+    color: var(--text-tertiary);
+}
+
+/* Number input 스핀 버튼 스타일 */
+#panel-modal-container input[type="number"]::-webkit-inner-spin-button,
+#panel-modal-container input[type="number"]::-webkit-outer-spin-button {
+    opacity: 0.5;
+    cursor: pointer;
+}
+
+#panel-modal-container input[type="number"]::-webkit-inner-spin-button:hover,
+#panel-modal-container input[type="number"]::-webkit-outer-spin-button:hover {
+    opacity: 1;
+}
+
+/* Range Input (슬라이더) */
+#panel-modal-container input[type="range"] {
+    width: 100%;
+    height: 6px;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    margin: var(--spacing-xs) 0;
+}
+
+#panel-modal-container input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    background: var(--accent-green);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    transition: all var(--transition-fast);
+}
+
+#panel-modal-container input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+    box-shadow: 0 2px 8px rgba(76, 175, 80, 0.4);
+}
+
+#panel-modal-container input[type="range"]::-webkit-slider-thumb:active {
+    transform: scale(1.1);
+}
+
+#panel-modal-container input[type="range"]::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    background: var(--accent-green);
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    transition: all var(--transition-fast);
+}
+
+#panel-modal-container input[type="range"]::-moz-range-thumb:hover {
+    transform: scale(1.15);
+    box-shadow: 0 2px 8px rgba(76, 175, 80, 0.4);
+}
+
+#panel-modal-container input[type="range"]::-moz-range-thumb:active {
+    transform: scale(1.1);
+}
+
+#panel-modal-container input[type="range"]::-moz-range-track {
+    height: 6px;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+}
+
+#panel-modal-container input[type="range"]::-moz-range-progress {
+    height: 6px;
+    background: var(--accent-green);
+    border-radius: 3px;
+}
+
+/* Range Container */
+#panel-modal-container .range-container {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+    width: 100%;
+}
+
+/* 체크박스 스타일 */
+#panel-modal-container input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background: var(--bg-secondary);
+    border: 2px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    position: relative;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+}
+
+#panel-modal-container input[type="checkbox"]:hover {
+    border-color: var(--accent-green);
+    background-color: var(--bg-primary);
+}
+
+#panel-modal-container input[type="checkbox"]:checked {
+    background: var(--accent-green);
+    border-color: var(--accent-green);
+}
+
+#panel-modal-container input[type="checkbox"]:checked::after {
+    content: '\f00c' !important; /* Font Awesome check icon */
+    font-family: 'Font Awesome 6 Free' !important;
+    font-weight: 900 !important;
+    position: absolute !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    color: white !important;
+    font-size: 12px !important;
+    line-height: 1 !important;
+    /* form-controls.css의 원형 점 스타일 상쇄 */
+    width: auto !important;
+    height: auto !important;
+    background: none !important;
+    border-radius: 0 !important;
+}
+
+#panel-modal-container input[type="checkbox"]:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+}
+
+#panel-modal-container input[type="checkbox"]:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* 라디오 버튼 스타일 */
+#panel-modal-container input[type="radio"] {
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background: var(--bg-secondary);
+    border: 2px solid var(--border-color);
+    border-radius: 50%;
+    position: relative;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+}
+
+#panel-modal-container input[type="radio"]:hover {
+    border-color: var(--accent-green);
+    background-color: var(--bg-primary);
+}
+
+#panel-modal-container input[type="radio"]:checked {
+    border-color: var(--accent-green);
+    background: var(--accent-green);
+}
+
+#panel-modal-container input[type="radio"]:checked::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    background: white;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+}
+
+#panel-modal-container input[type="radio"]:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+}
+
+#panel-modal-container input[type="radio"]:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ========================================
+   링크 스타일
+   ======================================== */
+
+#panel-modal-container a {
+    color: var(--accent-green);
+    text-decoration: none;
+    font-size: inherit;
+    transition: all var(--transition-fast);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+#panel-modal-container a:hover {
+    color: #66bb6a;
+    text-decoration: underline;
+}
+
+#panel-modal-container a:focus {
+    outline: 2px solid var(--accent-green);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+
+#panel-modal-container a.fa-solid,
+#panel-modal-container a[class*="fa-"] {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(76, 175, 80, 0.1);
+    color: var(--accent-green);
+    transition: all var(--transition-fast);
+}
+
+#panel-modal-container a.fa-solid:hover,
+#panel-modal-container a[class*="fa-"]:hover {
+    background: rgba(76, 175, 80, 0.2);
+    color: #66bb6a;
+    text-decoration: none;
+    transform: scale(1.1);
+}
+
+/* Icon 버튼 개선 */
+#panel-modal-container .icon-btn {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    cursor: pointer;
+    padding: var(--spacing-sm);
+    min-width: 36px;
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--border-radius-sm);
+    transition: all var(--transition-fast);
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+#panel-modal-container .icon-btn:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-green);
+    color: var(--accent-green);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+#panel-modal-container .icon-btn:active {
+    transform: translateY(0);
+}
+
+#panel-modal-container .icon-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* 일반 버튼 */
+#panel-modal-container button:not(.icon-btn),
+#panel-modal-container .btn {
+    background: var(--accent-green);
+    color: #ffffff;
+    border: none;
+    border-radius: var(--border-radius-sm);
+    padding: var(--spacing-sm) var(--spacing-lg);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    box-shadow: 0 2px 4px rgba(76, 175, 80, 0.2);
+}
+
+#panel-modal-container button:not(.icon-btn):hover,
+#panel-modal-container .btn:hover {
+    background: #66bb6a;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(76, 175, 80, 0.3);
+}
+
+#panel-modal-container button:not(.icon-btn):active,
+#panel-modal-container .btn:active {
+    transform: translateY(0);
+}
+
+#panel-modal-container .btn-secondary {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    box-shadow: none;
+}
+
+#panel-modal-container .btn-secondary:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-green);
+    color: var(--accent-green);
+}
+
+/* 접을 수 있는 섹션 */
+#panel-modal-container .collapsible-section {
+    margin-bottom: var(--spacing-lg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-md);
+    overflow: hidden;
+    background: var(--bg-primary);
+}
+
+#panel-modal-container .collapsible-section:last-child {
+    margin-bottom: 0;
+}
+
+#panel-modal-container .collapsible-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-md);
+    background: var(--bg-secondary);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    user-select: none;
+}
+
+#panel-modal-container .collapsible-header:hover {
+    background: var(--bg-tertiary);
+}
+
+#panel-modal-container .collapsible-header b {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+#panel-modal-container .collapsible-header .flex-container {
+    align-items: center;
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
+}
+
+#panel-modal-container .collapsible-icon {
+    transition: transform var(--transition-fast);
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+#panel-modal-container .collapsible-section.active .collapsible-icon {
+    transform: rotate(180deg);
+}
+
+#panel-modal-container .collapsible-content {
+    display: none;
+    padding: var(--spacing-lg);
+    border-top: 1px solid var(--border-color);
+}
+
+#panel-modal-container .collapsible-section.active .collapsible-content {
+    display: block;
+}
+
+/* 폼 그룹 */
+#panel-modal-container .form-group {
+    margin-bottom: var(--spacing-lg);
+}
+
+#panel-modal-container .form-group:last-child {
+    margin-bottom: 0;
+}
+
+#panel-modal-container .form-group label {
+    display: block;
+    margin-bottom: var(--spacing-sm);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+#panel-modal-container .form-group label span {
+    display: block;
+}
+
+/* 텍스트 영역 */
+#panel-modal-container .form-group textarea,
+#panel-modal-container textarea.text-input {
+    width: 100%;
+    resize: vertical;
+    min-height: 120px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    padding: var(--spacing-md);
+    color: var(--text-primary);
+    font-size: 16px; /* iOS에서 자동 확대 방지 (16px 이상 필요) */
+    font-family: inherit;
+    transition: all var(--transition-fast);
+    box-sizing: border-box;
+    line-height: 1.5;
+}
+
+#panel-modal-container .form-group textarea:hover,
+#panel-modal-container textarea.text-input:hover {
+    border-color: var(--accent-green);
+    background-color: var(--bg-primary);
+}
+
+#panel-modal-container .form-group textarea:focus,
+#panel-modal-container textarea.text-input:focus {
+    outline: none;
+    border-color: var(--accent-green);
+    background-color: var(--bg-secondary);
+    box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+}
+
+#panel-modal-container .form-group textarea::placeholder,
+#panel-modal-container textarea.text-input::placeholder {
+    color: var(--text-tertiary);
+}
+
+/* 라벨과 버튼이 함께 있는 경우 */
+#panel-modal-container .form-group-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-sm);
+    gap: var(--spacing-sm);
+}
+
+#panel-modal-container .form-group-header label {
+    margin: 0;
+    flex: 1;
+    min-width: 0;
+}
+
+#panel-modal-container .form-group-header .icon-btn {
+    flex-shrink: 0;
+}
+
+/* 힌트 텍스트 */
+#panel-modal-container .text_muted {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.6;
+    margin-bottom: var(--spacing-sm);
+    margin-top: var(--spacing-xs);
+}
+
+#panel-modal-container code {
+    background: var(--bg-tertiary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    color: var(--text-primary);
+}
+
+/* 체크박스 레이블 */
+#panel-modal-container .checkbox_label {
+    display: flex !important;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text-primary);
+    user-select: none;
+    flex-wrap: nowrap;
+}
+
+#panel-modal-container .checkbox_label.flexWrap {
+    flex-wrap: wrap;
+    white-space: normal;
+}
+
+#panel-modal-container .checkbox_label.alignItemsCenter {
+    align-items: center;
+}
+
+#panel-modal-container .checkbox_label input[type="radio"],
+#panel-modal-container .checkbox_label input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+#panel-modal-container .checkbox_label span {
+    flex: 0 1 auto;
+    line-height: 1.5;
+    min-width: 0;
+    white-space: normal;
+}
+
+#panel-modal-container .checkbox_label small {
+    display: inline;
+    margin-left: var(--spacing-xs);
+    margin-top: 0;
+    width: auto;
+    white-space: normal;
+}
+
+/* 아이콘 스타일 */
+#panel-modal-container .opacity50p {
+    opacity: 0.5;
+}
+
+/* Chat Settings 섹션 */
+#panel-modal-container .chat-settings-section h3 {
+    margin-bottom: var(--spacing-md);
+}
+
+/* 구분선 */
+#panel-modal-container hr {
+    margin: var(--spacing-lg) 0;
+    border: none;
+    border-top: 1px solid var(--border-color);
+    opacity: 0.5;
+}
+
+/* 샘플링 파라미터 그리드 레이아웃 */
+#panel-modal-container .sampling-params-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+}
+
+#panel-modal-container .sampling-params-grid .form-group {
+    margin-bottom: 0;
+}
+
+/* 프롬프트 매니저 Footer 버튼 스타일 */
+#panel-modal-container .completion_prompt_manager_footer,
+#panel-modal-container [class*="prompt_manager_footer"] {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: center;
+    flex-wrap: nowrap;
+}
+
+#panel-modal-container .completion_prompt_manager_footer .menu_button,
+#panel-modal-container [class*="prompt_manager_footer"] .menu_button,
+#panel-modal-container .menu_button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    margin: 0;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    color: var(--text-primary);
+    font-size: 14px;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+    box-sizing: border-box;
+}
+
+#panel-modal-container .completion_prompt_manager_footer .menu_button:hover,
+#panel-modal-container [class*="prompt_manager_footer"] .menu_button:hover,
+#panel-modal-container .menu_button:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-green);
+    color: var(--accent-green);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+#panel-modal-container .completion_prompt_manager_footer .menu_button:active,
+#panel-modal-container [class*="prompt_manager_footer"] .menu_button:active,
+#panel-modal-container .menu_button:active {
+    transform: translateY(0);
+}
+
+#panel-modal-container .completion_prompt_manager_footer .menu_button.caution,
+#panel-modal-container [class*="prompt_manager_footer"] .menu_button.caution,
+#panel-modal-container .menu_button.caution {
+    color: var(--accent-red, #f44336);
+}
+
+#panel-modal-container .completion_prompt_manager_footer .menu_button.caution:hover,
+#panel-modal-container [class*="prompt_manager_footer"] .menu_button.caution:hover,
+#panel-modal-container .menu_button.caution:hover {
+    background: rgba(244, 67, 54, 0.1);
+    border-color: var(--accent-red, #f44336);
+    color: var(--accent-red, #f44336);
+}
+
+/* 반응형 */
+@media screen and (max-width: 768px) {
+    #panel-modal-container .modal-content {
+        max-width: 95vw;
+    }
+    
+    #panel-modal-container .preset-select-group {
+        flex-wrap: wrap;
+    }
+    
+    #panel-modal-container .preset-select-group .text-input {
+        flex: 1 1 100%;
+    }
+    
+    #panel-modal-container .flex-container {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    #panel-modal-container .flex-container > .form-group {
+        width: 100%;
+    }
+    
+    #panel-modal-container .sampling-params-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    #panel-modal-container input[type="range"] {
+        height: 8px;
+    }
+    
+    #panel-modal-container input[type="range"]::-webkit-slider-thumb {
+        width: 20px;
+        height: 20px;
+    }
+    
+    #panel-modal-container input[type="range"]::-moz-range-thumb {
+        width: 20px;
+        height: 20px;
+    }
+}
