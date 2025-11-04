@@ -999,13 +999,17 @@ class ChatManager {
                 }
             };
             
-            // 블러 이벤트 핸들러
-            this._messageInputBlurHandler = adjustHeight;
+            // iOS에서 blur 시 키보드가 올라온 상태의 window.innerHeight로 계산되어 
+            // 높이가 과도하게 줄어드는 문제를 방지하기 위해 blur 이벤트 제거
+            // CSS의 max-height: 40dvh가 제한을 담당함
+            // 블러 이벤트 핸들러 제거
+            // this._messageInputBlurHandler = adjustHeight;
             
             // 새로운 이벤트 리스너 추가
             this.elements.messageInput.addEventListener('keydown', this._messageInputKeydownHandler);
             this.elements.messageInput.addEventListener('input', this._messageInputInputHandler);
-            this.elements.messageInput.addEventListener('blur', this._messageInputBlurHandler);
+            // blur 이벤트 제거: iOS에서 키보드가 올라온 상태에서 blur 시 높이가 과도하게 줄어드는 문제 방지
+            // this.elements.messageInput.addEventListener('blur', this._messageInputBlurHandler);
         });
     }
 

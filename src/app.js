@@ -394,8 +394,9 @@ class MobileChatApp {
         }
         
         messageInput.addEventListener('input', adjustHeight);
-        // 포커스를 잃었을 때도 높이 재조정
-        messageInput.addEventListener('blur', adjustHeight);
+        // iOS에서 blur 시 키보드가 올라온 상태의 window.innerHeight로 계산되어 
+        // 높이가 과도하게 줄어드는 문제를 방지하기 위해 blur 이벤트 제거
+        // CSS의 max-height: 40dvh가 제한을 담당함
     }
     
     /**
