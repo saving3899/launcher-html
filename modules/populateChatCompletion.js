@@ -399,7 +399,7 @@ async function populateChatHistory(messages, prompts, chatCompletion, type = nul
     const messagesArray = Array.isArray(messages) ? messages : [];
     
     // 디버깅: populateChatHistory에 전달되는 messages 확인
-    console.log('[populateChatHistory] 전달받은 messages:', {
+    console.debug('[populateChatHistory] 전달받은 messages:', {
         messagesCount: messagesArray.length,
         messagesPreview: messagesArray.map(msg => ({
             role: msg.role,

@@ -214,7 +214,7 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
     // (메시지 삭제 후 즉시 새 메시지를 보낼 때를 대비)
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     
-    console.log('[AIMessageSender] getChatHistory() 호출 전:', {
+    console.debug('[AIMessageSender] getChatHistory() 호출 전:', {
         userMessage: userMessage?.substring(0, 50) || '(빈 메시지)',
         generateType,
         skipGreetingCheck
@@ -223,7 +223,7 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
     const existingChatHistory = chatManager.getChatHistory();
     let chatHistory = [...existingChatHistory];
     
-    console.log('[AIMessageSender] getChatHistory() 호출 후:', {
+    console.debug('[AIMessageSender] getChatHistory() 호출 후:', {
         historyCount: chatHistory.length,
         historyPreview: chatHistory.map(msg => ({
             role: msg.role,
@@ -304,7 +304,7 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
         // 4. 메시지가 0개일 때만 그리팅 추가 (메시지가 1개 이상이면 이미 채팅이 진행 중이므로 그리팅 추가 안 함)
         const shouldAddGreeting = !hasGreeting && !messageDeletedRecently && !hasStoredMessages && chatHistory.length === 0;
         
-        console.log('[AIMessageSender] 그리팅 체크:', {
+        console.debug('[AIMessageSender] 그리팅 체크:', {
             hasGreetingInDOM,
             hasGreetingInChat,
             hasGreetingInStorage,
@@ -325,15 +325,15 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
                 const processedGreeting = substituteParams(firstMessage.trim(), 'User', characterName);
                 chatHistory.unshift({ role: 'assistant', content: processedGreeting });
                 
-                console.log('[AIMessageSender] 그리팅 추가됨:', {
+                console.debug('[AIMessageSender] 그리팅 추가됨:', {
                     greetingPreview: processedGreeting.substring(0, 50)
                 });
             }
         } else {
             if (messageDeletedRecently) {
-                console.log('[AIMessageSender] 그리팅 추가 스킵: 메시지가 최근에 삭제됨');
+                console.debug('[AIMessageSender] 그리팅 추가 스킵: 메시지가 최근에 삭제됨');
             } else if (hasStoredMessages) {
-                console.log('[AIMessageSender] 그리팅 추가 스킵: IndexedDB에 저장된 메시지가 있음 (채팅이 이미 시작됨)');
+                console.debug('[AIMessageSender] 그리팅 추가 스킵: IndexedDB에 저장된 메시지가 있음 (채팅이 이미 시작됨)');
             }
         }
     }
@@ -397,7 +397,7 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
     let messages = null;
     try {
         // prepareOpenAIMessagesFromCharacter에 전달되는 chatHistory 확인
-        console.log('[AIMessageSender] prepareOpenAIMessagesFromCharacter 호출 전:', {
+        console.debug('[AIMessageSender] prepareOpenAIMessagesFromCharacter 호출 전:', {
             chatHistoryCount: chatHistory.length,
             chatHistoryPreview: chatHistory.map(msg => ({
                 role: msg.role,
@@ -631,7 +631,7 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
             );
         } else {
             // 비스트리밍 응답 처리
-            console.log('[AIMessageSender] 비스트리밍 모드로 API 호출:', {
+            console.debug('[AIMessageSender] 비스트리밍 모드로 API 호출:', {
                 apiProvider,
                 generateType
             });
@@ -641,7 +641,7 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
                 apiOptions
             );
 
-            console.log('[AIMessageSender] 비스트리밍 응답 받음:', {
+            console.debug('[AIMessageSender] 비스트리밍 응답 받음:', {
                 responseType: typeof response,
                 isObject: typeof response === 'object' && response !== null,
                 hasText: typeof response === 'object' && response !== null ? !!response.text : false,
@@ -654,7 +654,7 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
                 responseText = response.text || response.content || '';
                 reasoning = response.reasoning || null;
                 
-                console.log('[AIMessageSender] 비스트리밍 응답에서 추론 확인:', {
+                console.debug('[AIMessageSender] 비스트리밍 응답에서 추론 확인:', {
                     responseTextLength: responseText.length,
                     responseTextPreview: responseText.substring(0, 200),
                     reasoningLength: reasoning ? reasoning.length : 0,
@@ -666,7 +666,7 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
                 if (reasoning && reasoning.trim()) {
                     const reasoningTrimmed = reasoning.trim();
                     if (responseText.includes(reasoningTrimmed)) {
-                        console.log('[AIMessageSender] 비스트리밍: 추론 내용이 텍스트에 포함되어 있음, 제거 시작');
+                        console.debug('[AIMessageSender] 비스트리밍: 추론 내용이 텍스트에 포함되어 있음, 제거 시작');
                         
                         // 모든 위치에서 추론 제거
                         let cleanedText = responseText;
@@ -686,19 +686,19 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
                         
                         responseText = cleanedText;
                         
-                        console.log('[AIMessageSender] 비스트리밍: 추론 제거 후:', {
+                        console.debug('[AIMessageSender] 비스트리밍: 추론 제거 후:', {
                             responseTextLength: responseText.length,
                             responseTextPreview: responseText.substring(0, 200)
                         });
                     } else {
-                        console.log('[AIMessageSender] 비스트리밍: 추론 내용이 텍스트에 포함되어 있지 않음 (별도 필드로만 옴)');
+                        console.debug('[AIMessageSender] 비스트리밍: 추론 내용이 텍스트에 포함되어 있지 않음 (별도 필드로만 옴)');
                     }
                 } else {
-                    console.log('[AIMessageSender] 비스트리밍: 추론 내용 없음');
+                    console.debug('[AIMessageSender] 비스트리밍: 추론 내용 없음');
                 }
             } else {
                 responseText = response;
-                console.log('[AIMessageSender] 비스트리밍: 문자열 응답 (추론 정보 없음)');
+                console.debug('[AIMessageSender] 비스트리밍: 문자열 응답 (추론 정보 없음)');
             }
 
             // 계속하기 모드 처리

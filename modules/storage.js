@@ -441,7 +441,7 @@ class CharacterStorage {
 
     static async saveCurrent(characterId) {
         // ⚠️ 디버깅: 캐릭터 저장 시 호출 스택 확인
-        console.log('[CharacterStorage.saveCurrent] 호출됨:', {
+        console.debug('[CharacterStorage.saveCurrent] 호출됨:', {
             characterId: characterId,
             stackTrace: new Error().stack
         });

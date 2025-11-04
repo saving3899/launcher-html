@@ -1744,9 +1744,8 @@ class ChatManager {
         // 따라서 DOM에서 찾은 메시지만 채팅 히스토리에 포함됨
         const messageWrappers = this.elements.chatMessages.querySelectorAll('.message-wrapper');
         
-        // 디버깅: getChatHistory 호출 시점의 메시지 수 확인
-        // console.debug 대신 console.log 사용하여 필터링되지 않도록 함
-        console.log('[ChatManager.getChatHistory] DOM에서 메시지 읽기:', {
+        // 디버깅: getChatHistory 호출 시점의 메시지 수 확인 (console.debug로 변경)
+        console.debug('[ChatManager.getChatHistory] DOM에서 메시지 읽기:', {
             wrapperCount: messageWrappers.length,
             chatArrayLength: this.chat?.length || 0,
             // 실제 wrapper의 UUID 확인
@@ -1823,20 +1822,19 @@ class ChatManager {
         // 정렬 후 _sendDate 제거 (내부용이므로 반환값에서 제외)
         history.forEach(msg => delete msg._sendDate);
 
-        // 디버깅: 반환되는 히스토리 확인
-        // console.debug 대신 console.log 사용하여 필터링되지 않도록 함
+        // 디버깅: 반환되는 히스토리 확인 (console.debug로 변경)
         if (history.length > 0) {
             const historyPreview = history.map(msg => ({
                 role: msg.role,
                 contentPreview: msg.content?.substring(0, 50) || 'no-content',
                 uuid: msg.uuid?.substring(0, 8) || 'no-uuid'
             }));
-            console.log('[ChatManager.getChatHistory] ✅ 반환되는 히스토리:', {
+            console.debug('[ChatManager.getChatHistory] ✅ 반환되는 히스토리:', {
                 historyCount: history.length,
                 historyPreview: historyPreview
             });
         } else {
-            console.log('[ChatManager.getChatHistory] ✅ 히스토리 비어있음 (메시지 0개)');
+            console.debug('[ChatManager.getChatHistory] ✅ 히스토리 비어있음 (메시지 0개)');
         }
 
         return history;
@@ -2052,7 +2050,7 @@ class ChatManager {
         // 렌더링된 인덱스 추적 (중복 방지)
         const renderedIndexes = new Set();
         
-        console.log('[ChatManager.loadMoreMessagesFromStart] 더보기 로딩:', {
+        console.debug('[ChatManager.loadMoreMessagesFromStart] 더보기 로딩:', {
             startIndex,
             endIndex,
             messagesToLoad,
@@ -2082,7 +2080,7 @@ class ChatManager {
             }
         });
         
-        console.log('[ChatManager.loadMoreMessagesFromStart] 기존 DOM UUID 수:', existingUuids.size);
+        console.debug('[ChatManager.loadMoreMessagesFromStart] 기존 DOM UUID 수:', existingUuids.size);
         
         // 메시지를 순서대로 렌더링 (오래된 것부터)
         // 실리태번과 동일: 원본 배열 인덱스를 저장 (forceId)
@@ -2117,7 +2115,7 @@ class ChatManager {
             }
             // 이미 DOM에 있는 메시지는 건너뛰기 (중복 방지)
             if (message.uuid && existingUuids.has(message.uuid)) {
-                console.log('[ChatManager.loadMoreMessagesFromStart] 중복 메시지 건너뛰기:', {
+                console.debug('[ChatManager.loadMoreMessagesFromStart] 중복 메시지 건너뛰기:', {
                     uuid: message.uuid.substring(0, 8),
                     send_date: message.send_date,
                     mes: message.mes?.substring(0, 50)
@@ -2249,7 +2247,7 @@ class ChatManager {
             }
         }
         
-        console.log('[ChatManager.loadMoreMessagesFromStart] 추가할 메시지:', {
+        console.debug('[ChatManager.loadMoreMessagesFromStart] 추가할 메시지:', {
             totalToAdd: messageFragments.length,
             skipped: skippedCount
         });
@@ -3605,14 +3603,14 @@ class ChatManager {
         // 메시지 추가 후 자동 저장 (디바운스)
         // 더보기 로딩 중이거나 채팅 로딩 중이면 저장하지 않음 (중복 방지)
         if (!this._isLoadingMoreMessages && !this._isLoadingChat) {
-            console.log('[addMessage] 저장 시작 (saveChatDebounced 호출)');
+            console.debug('[addMessage] 저장 시작 (saveChatDebounced 호출)');
             // 백그라운드 탭에서도 작동하도록 비동기로 실행 (await 없이)
             // saveChatDebounced 내부에서 백그라운드 감지하여 즉시 저장함
             this.saveChatDebounced().catch((error) => {
                 console.error('[addMessage] saveChatDebounced 중 오류:', error);
             });
         } else {
-            console.log('[addMessage] 저장 건너뜀:', {
+            console.debug('[addMessage] 저장 건너뜀:', {
                 _isLoadingMoreMessages: this._isLoadingMoreMessages,
                 _isLoadingChat: this._isLoadingChat
             });
@@ -3764,7 +3762,7 @@ class ChatManager {
      * 채팅 저장 (디바운스)
      */
     async saveChatDebounced() {
-        console.log('[saveChatDebounced] 호출됨:', {
+        console.debug('[saveChatDebounced] 호출됨:', {
             _isSavingChat: this._isSavingChat,
             _isLoadingMoreMessages: this._isLoadingMoreMessages,
             _isLoadingChat: this._isLoadingChat
@@ -3772,13 +3770,13 @@ class ChatManager {
         
         // 현재 저장 중이면 무시 (중복 저장 방지)
         if (this._isSavingChat) {
-            console.log('[saveChatDebounced] 이미 저장 중이므로 건너뜀');
+            console.debug('[saveChatDebounced] 이미 저장 중이므로 건너뜀');
             return;
         }
         
         // 더보기 로딩 중이면 저장하지 않음 (중복 방지)
         if (this._isLoadingMoreMessages) {
-            console.log('[saveChatDebounced] 더보기 로딩 중이므로 건너뜀');
+            console.debug('[saveChatDebounced] 더보기 로딩 중이므로 건너뜀');
             return;
         }
         
@@ -3800,9 +3798,9 @@ class ChatManager {
             // 백그라운드에서도 실행되도록 비동기로 실행 (await 없이)
             // saveChat은 async 함수이므로 Promise로 실행되며, 백그라운드에서도 실행됨
             // 백그라운드 실행 확인을 위한 로그 (백그라운드에서도 실행되면 콘솔에 표시됨)
-            console.log('[saveChatDebounced] 백그라운드 저장 시작', { timestamp: Date.now(), isBackground: true });
+            console.debug('[saveChatDebounced] 백그라운드 저장 시작', { timestamp: Date.now(), isBackground: true });
             this.saveChat().then(() => {
-                console.log('[saveChatDebounced] 백그라운드 저장 완료', { timestamp: Date.now() });
+                console.debug('[saveChatDebounced] 백그라운드 저장 완료', { timestamp: Date.now() });
             }).catch((error) => {
                 console.debug('[saveChatDebounced] 백그라운드 저장 중 오류:', error);
             });
@@ -3853,7 +3851,7 @@ class ChatManager {
      * @param {object} [withMetadata] - 추가 메타데이터 (선택)
      */
     async saveChat(chatName = null, withMetadata = {}) {
-        console.log('[ChatManager.saveChat] 저장 시작:', {
+        console.debug('[ChatManager.saveChat] 저장 시작:', {
             currentChatId: this.currentChatId,
             currentCharacterId: this.currentCharacterId,
             _isSavingChat: this._isSavingChat,
@@ -3863,7 +3861,7 @@ class ChatManager {
         
         // 중복 저장 방지
         if (this._isSavingChat) {
-            console.log('[ChatManager.saveChat] 이미 저장 중이므로 건너뜀');
+            console.debug('[ChatManager.saveChat] 이미 저장 중이므로 건너뜀');
             // 경고 코드 토스트 알림 표시
             if (typeof showErrorCodeToast === 'function') {
                 showErrorCodeToast('WARN_CHAT_20011', '이미 저장 중이므로 무시');
@@ -3873,13 +3871,13 @@ class ChatManager {
         
         // 더보기 로딩 중이면 저장하지 않음 (중복 방지)
         if (this._isLoadingMoreMessages) {
-            console.log('[ChatManager.saveChat] 더보기 로딩 중이므로 건너뜀');
+            console.debug('[ChatManager.saveChat] 더보기 로딩 중이므로 건너뜀');
             return;
         }
         
         // 채팅 로딩 중이면 저장하지 않음 (중복 방지)
         if (this._isLoadingChat) {
-            console.log('[ChatManager.saveChat] 채팅 로딩 중이므로 건너뜀');
+            console.debug('[ChatManager.saveChat] 채팅 로딩 중이므로 건너뜀');
             return;
         }
         
@@ -3916,7 +3914,7 @@ class ChatManager {
                         // 단, 저장소 메시지가 적은 경우(새 채팅 등)는 저장해야 함
                         const isLoadingLargeChat = storedMessageCount >= 10 && domMessageCount <= 1 && !hasNewMessages;
                         
-                        console.log('[ChatManager.saveChat] 저장 전 체크:', {
+                        console.debug('[ChatManager.saveChat] 저장 전 체크:', {
                             chatId: this.currentChatId,
                             storedMessageCount,
                             domMessageCount,
@@ -3928,7 +3926,7 @@ class ChatManager {
                         
                         // 대용량 채팅 로딩 중인 경우에만 저장 건너뜀
                         if (isLoadingLargeChat) {
-                            console.log('[ChatManager.saveChat] 대용량 채팅 로딩 중으로 감지, 저장 건너뜀');
+                            console.debug('[ChatManager.saveChat] 대용량 채팅 로딩 중으로 감지, 저장 건너뜀');
                             return;
                         }
                         // 그 외에는 모두 저장 (새 채팅, 불러온 채팅, 리롤 후 등 모두 저장)
@@ -3940,12 +3938,12 @@ class ChatManager {
             }
             
             if (!this.currentCharacterId) {
-                console.log('[ChatManager.saveChat] currentCharacterId가 없어서 저장 건너뜀');
+                console.debug('[ChatManager.saveChat] currentCharacterId가 없어서 저장 건너뜀');
                 this._isSavingChat = false; // 저장 플래그 해제
                 return;
             }
             
-            console.log('[ChatManager.saveChat] 저장 진행 중...');
+            console.debug('[ChatManager.saveChat] 저장 진행 중...');
             
             // 저장 시작 플래그 설정 (이미 위에서 설정했지만 다시 설정)
             this._isSavingChat = true;
@@ -4033,7 +4031,7 @@ class ChatManager {
                                 existingChatData = bestMatch.chatData;
                                 chatId = bestMatch.chatId;
                                 this.currentChatId = bestMatch.chatId; // 복원
-                                console.log('[ChatManager.saveChat] currentChatId 복원 (this.chat UUID 매칭 - 시작 부분):', {
+                                console.debug('[ChatManager.saveChat] currentChatId 복원 (this.chat UUID 매칭 - 시작 부분):', {
                                     chatId: chatId.substring(0, 50),
                                     messageCount: existingChatData.messages?.length || 0,
                                     chatUuidsCount: chatMessageUuids.length,
@@ -4142,7 +4140,7 @@ class ChatManager {
                 chatId = candidateChatId;
                 isNewChat = true;
                 
-                console.log('[ChatManager.saveChat] 새 채팅 ID 생성:', {
+                console.debug('[ChatManager.saveChat] 새 채팅 ID 생성:', {
                     chatId,
                     chatName: finalChatName,
                     timestamp
@@ -4251,14 +4249,14 @@ class ChatManager {
                     // 하지만 existingChatData가 있으면 병합 로직을 거쳐야 함 (삭제된 메시지 제외)
                     if (existingChatData && existingChatData.messages && existingChatData.messages.length > 0) {
                         // 병합 로직 경로로 이동 (아래에서 처리)
-                        console.log('[ChatManager.saveChat] 기존 채팅이 있으므로 병합 로직 사용 (this.chat 경로):', {
+                        console.debug('[ChatManager.saveChat] 기존 채팅이 있으므로 병합 로직 사용 (this.chat 경로):', {
                             chatArrayLength: this.chat.length,
                             existingMessageCount: existingChatData.messages.length,
                             currentChatId: this.currentChatId?.substring(0, 30) || 'null'
                         });
                     } else {
                         messages = [...this.chat];
-                        console.log('[ChatManager.saveChat] ✅ this.chat 배열을 소스로 사용 (실리태번 방식):', {
+                        console.debug('[ChatManager.saveChat] ✅ this.chat 배열을 소스로 사용 (실리태번 방식):', {
                             chatArrayLength: this.chat.length,
                             messagesCount: messages.length,
                             currentChatId: this.currentChatId?.substring(0, 30) || 'null',
@@ -4417,7 +4415,7 @@ class ChatManager {
                         }
                         return msg;
                     });
-                    console.log('[ChatManager.saveChat] this.chat을 domMessages로 사용 (병합 로직 준비):', {
+                    console.debug('[ChatManager.saveChat] this.chat을 domMessages로 사용 (병합 로직 준비):', {
                         chatArrayLength: this.chat.length,
                         domMessagesLength: domMessages.length
                     });
@@ -4572,7 +4570,7 @@ class ChatManager {
                 
                 // 디버깅: DOM에서 수집한 메시지 UUID 확인
                 const collectedUuids = domMessages.map(msg => msg.uuid?.substring(0, 8) || 'no-uuid');
-                console.log('[ChatManager.saveChat] DOM에서 메시지 수집:', {
+                console.debug('[ChatManager.saveChat] DOM에서 메시지 수집:', {
                     domMessageCount: domMessages.length,
                     collectedUuids: collectedUuids,
                     // DOM에서 실제로 찾은 메시지 래퍼 수와 비교
@@ -4680,7 +4678,7 @@ class ChatManager {
                             uuid: msg.uuid,
                             send_date: msg.send_date || Date.now()
                         }));
-                        console.log('[ChatManager.saveChat] this.chat을 domMessages로 사용 (리롤 후 새 메시지):', {
+                        console.debug('[ChatManager.saveChat] this.chat을 domMessages로 사용 (리롤 후 새 메시지):', {
                             chatArrayLength: this.chat.length,
                             domMessagesLength: domMessages.length
                         });
@@ -4708,7 +4706,7 @@ class ChatManager {
                         return !domMessageUuids.has(msg.uuid);
                     });
                     
-                    console.log('[ChatManager.saveChat] 메시지 병합:', {
+                    console.debug('[ChatManager.saveChat] 메시지 병합:', {
                         chatId: chatId?.substring(0, 30),
                         domMessageCount: (domMessages || []).length,
                         existingMessageCount: existingMessages.length,
@@ -4721,7 +4719,7 @@ class ChatManager {
                     
                     // ⚠️ 중요: messages가 이미 설정되었으면 병합 로직 건너뜀 (불러온 채팅이고 아무 메시지도 추가하지 않음)
                     if (messagesAlreadySet) {
-                        console.log('[ChatManager.saveChat] messages가 이미 설정되어 병합 로직 건너뜀:', {
+                        console.debug('[ChatManager.saveChat] messages가 이미 설정되어 병합 로직 건너뜀:', {
                             messageCount: messages.length,
                             reason: '불러온 채팅이고 아무 메시지도 추가하지 않아 existingMessages 사용'
                         });
@@ -4837,7 +4835,7 @@ class ChatManager {
                             // send_date 기준으로 정렬 (순서 보장)
                             messages.sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
                             
-                            console.log('[ChatManager.saveChat] ✅ 병합 완료:', {
+                            console.debug('[ChatManager.saveChat] ✅ 병합 완료:', {
                                 totalMessages: messages.length,
                                 domMessages: (domMessages || []).length,
                                 existingMessages: existingMessages.length,
@@ -4849,7 +4847,7 @@ class ChatManager {
                         } else {
                             // 모든 메시지가 DOM에 있으면 DOM 메시지만 사용
                             messages = domMessages || [];
-                            console.log('[ChatManager.saveChat] ⚠️ 병합 불필요 (모든 메시지가 DOM에 있음):', {
+                            console.debug('[ChatManager.saveChat] ⚠️ 병합 불필요 (모든 메시지가 DOM에 있음):', {
                                 totalMessages: messages.length,
                                 domMessages: (domMessages || []).length
                             });
@@ -4875,7 +4873,7 @@ class ChatManager {
                                 uuid: msg.uuid,
                                 send_date: msg.send_date || Date.now()
                             }));
-                            console.log('[ChatManager.saveChat] this.chat을 domMessages로 사용 (리롤 후 새 메시지 - else 블록):', {
+                            console.debug('[ChatManager.saveChat] this.chat을 domMessages로 사용 (리롤 후 새 메시지 - else 블록):', {
                                 chatArrayLength: this.chat.length,
                                 domMessagesLength: domMessages.length
                             });
@@ -4912,13 +4910,13 @@ class ChatManager {
                         // 중요: domMessages가 null이면 this.chat을 사용 (리롤 후 새 메시지 생성 완료 시)
                         if (domMessages === null && this.chat && this.chat.length > 0) {
                             messages = [...this.chat];
-                            console.log('[ChatManager.saveChat] this.chat을 사용 (chatUuids.size === 0 - 리롤 후 새 메시지):', {
+                            console.debug('[ChatManager.saveChat] this.chat을 사용 (chatUuids.size === 0 - 리롤 후 새 메시지):', {
                                 chatArrayLength: this.chat.length,
                                 messagesCount: messages.length
                             });
                         } else {
                             messages = domMessages || [];
-                            console.log('[ChatManager.saveChat] ⚠️ this.chat이 비어있어 DOM 메시지만 사용 (삭제된 메시지 제외):', {
+                            console.debug('[ChatManager.saveChat] ⚠️ this.chat이 비어있어 DOM 메시지만 사용 (삭제된 메시지 제외):', {
                                 domMessageCount: (domMessages || []).length,
                                 existingMessageCount: existingMessages.length,
                                 reason: 'this.chat이 비어있어 병합 불가'
@@ -4973,7 +4971,7 @@ class ChatManager {
                         
                         messages.sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
                         
-                        console.log('[ChatManager.saveChat] ✅ 병합 완료 (existingChatData 있음):', {
+                        console.debug('[ChatManager.saveChat] ✅ 병합 완료 (existingChatData 있음):', {
                             totalMessages: messages.length,
                             domMessages: (domMessages || []).length,
                             existingMessages: existingMessages.length,
@@ -4982,7 +4980,7 @@ class ChatManager {
                     } else {
                         // 모든 메시지가 DOM에 있으면 DOM 메시지만 사용
                         messages = domMessages || [];
-                        console.log('[ChatManager.saveChat] ⚠️ 병합 불필요 (모든 메시지가 DOM에 있음):', {
+                        console.debug('[ChatManager.saveChat] ⚠️ 병합 불필요 (모든 메시지가 DOM에 있음):', {
                             totalMessages: messages.length,
                             domMessages: (domMessages || []).length
                         });
@@ -4992,13 +4990,13 @@ class ChatManager {
                     // 중요: 리롤 후 새 메시지 생성 완료 시 this.chat에 메시지가 있으면 그것을 사용
                     if (domMessages === null && this.chat && this.chat.length > 0) {
                         messages = [...this.chat];
-                        console.log('[ChatManager.saveChat] this.chat을 사용 (기존 채팅 데이터 없음 - 리롤 후 새 메시지):', {
+                        console.debug('[ChatManager.saveChat] this.chat을 사용 (기존 채팅 데이터 없음 - 리롤 후 새 메시지):', {
                             chatArrayLength: this.chat.length,
                             messagesCount: messages.length
                         });
                     } else {
                         messages = domMessages || messages;
-                        console.log('[ChatManager.saveChat] ⚠️ 기존 채팅 데이터 없음, DOM 메시지만 저장:', {
+                        console.debug('[ChatManager.saveChat] ⚠️ 기존 채팅 데이터 없음, DOM 메시지만 저장:', {
                             domMessageCount: domMessages ? domMessages.length : 0,
                             messagesCount: messages.length,
                             chatArrayLength: this.chat ? this.chat.length : 0,
@@ -5046,7 +5044,7 @@ class ChatManager {
             
             // 디버깅: messages가 비어있는데 this.chat에는 메시지가 있으면 경고
             if (messages.length === 0 && this.chat && this.chat.length > 0) {
-                console.warn('[ChatManager.saveChat] ⚠️ messages가 비어있는데 this.chat에는 메시지가 있음:', {
+                console.debug('[ChatManager.saveChat] ⚠️ messages가 비어있는데 this.chat에는 메시지가 있음:', {
                     messagesLength: messages.length,
                     chatArrayLength: this.chat.length,
                     chatUuids: this.chat.map(msg => msg.uuid?.substring(0, 8) || 'no-uuid'),
@@ -5068,7 +5066,7 @@ class ChatManager {
                 }
                 messageCount = messages.length;
                 
-                console.log('[ChatManager.saveChat] this.chat을 사용하여 messages 복구:', {
+                console.debug('[ChatManager.saveChat] this.chat을 사용하여 messages 복구:', {
                     messagesCount: messages.length,
                     chatArrayLength: this.chat.length,
                     deletedMessageCount: this._deletedMessageUuids ? this._deletedMessageUuids.size : 0
@@ -5087,7 +5085,7 @@ class ChatManager {
                 }).length;
             }
             
-            console.log('[ChatManager.saveChat] 메시지 수집 완료:', {
+            console.debug('[ChatManager.saveChat] 메시지 수집 완료:', {
                 messageCount: messages.length,
                 chatArrayLength: this.chat ? this.chat.length : 0,
                 domMessagesLength: domMessages ? domMessages.length : 0,
@@ -5160,7 +5158,7 @@ class ChatManager {
                         savedUuids: verifySaved.messages?.map(m => m.uuid?.substring(0, 8) || 'no-uuid') || []
                     });
                 } else {
-                    console.log('[ChatManager.saveChat] ✅ IndexedDB 저장 확인:', {
+                    console.debug('[ChatManager.saveChat] ✅ IndexedDB 저장 확인:', {
                         messageCount: savedMessageCount,
                         chatId: chatId.substring(0, 50),
                         savedUuids: verifySaved.messages?.map(m => m.uuid?.substring(0, 8) || 'no-uuid') || []
@@ -5395,7 +5393,7 @@ class ChatManager {
                 startIndex = 0;
             }
             
-            console.log('[ChatManager.loadChat] 메시지 렌더링 정보:', {
+            console.debug('[ChatManager.loadChat] 메시지 렌더링 정보:', {
                 totalMessages: this.chat.length,
                 messagesToLoad: count,
                 calculatedStartIndex: this.chat.length > count ? this.chat.length - count : 0,
@@ -5424,7 +5422,7 @@ class ChatManager {
                 }
             });
             
-            console.log('[ChatManager.loadChat] 기존 DOM 메시지 UUID 수:', existingUuids.size);
+            console.debug('[ChatManager.loadChat] 기존 DOM 메시지 UUID 수:', existingUuids.size);
             
             // 실리태번과 동일: for (let i = startIndex; i < chat.length; i++)
             // startIndex부터 끝까지 순서대로 렌더링 (단순하게)
@@ -5434,7 +5432,7 @@ class ChatManager {
                 
                 // 이미 DOM에 있는 메시지는 건너뛰기 (중복 방지)
                 if (message.uuid && existingUuids.has(message.uuid)) {
-                    console.log('[ChatManager.loadChat] 중복 메시지 건너뛰기:', {
+                    console.debug('[ChatManager.loadChat] 중복 메시지 건너뛰기:', {
                         index: i,
                         uuid: message.uuid.substring(0, 8),
                         send_date: message.send_date
@@ -5605,7 +5603,7 @@ class ChatManager {
                 renderedIndexes.add(i);
             }
             
-            console.log('[ChatManager.loadChat] 렌더링 완료:', {
+                        console.debug('[ChatManager.loadChat] 렌더링 완료:', {
                 renderedCount: messageWrappers.length,
                 finalDOMCount: this.elements.chatMessages.querySelectorAll('.message-wrapper').length,
                 firstMessageIndex: messageWrappers[0] ? (messageWrappers[0].dataset.messageIndex || messageWrappers[0].dataset.messageUuid?.substring(0, 8)) : null,
@@ -5703,7 +5701,7 @@ class ChatManager {
                     const oldChatName = character.chat;
                     character.chat = this.currentChatName;
                     await CharacterStorage.save(chatCharacterId, character);
-                    console.log('[ChatManager.loadChat] ✅ character.chat 업데이트 완료:', {
+                    console.debug('[ChatManager.loadChat] ✅ character.chat 업데이트 완료:', {
                         characterId: chatCharacterId,
                         oldChatName: oldChatName || '(none)',
                         newChatName: this.currentChatName,
@@ -5774,9 +5772,9 @@ class ChatManager {
             }
         } finally {
             // 로딩 완료 플래그 해제
-            console.log('[ChatManager.loadChat] finally 블록 실행 - _isLoadingChat 플래그 해제');
+            console.debug('[ChatManager.loadChat] finally 블록 실행 - _isLoadingChat 플래그 해제');
             this._isLoadingChat = false;
-            console.log('[ChatManager.loadChat] ✅ _isLoadingChat 플래그 해제 완료');
+            console.debug('[ChatManager.loadChat] ✅ _isLoadingChat 플래그 해제 완료');
             
             // 중요: this.chat 배열은 모든 메시지를 유지해야 함
             // DOM에는 messagesToLoad 설정에 따라 일부만 표시되지만, this.chat은 전체 메시지를 유지
