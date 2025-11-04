@@ -2020,6 +2020,7 @@ class PanelManager {
                     const quickReply = await QuickReplyStorage.load();
                     const regexScripts = await RegexScriptStorage.loadAll();
                     const aiLoadingPresets = await AILoadingStorage.loadAllPresets();
+                    const userSounds = await UserSoundStorage.loadAll();
                     
                     // 프롬프트 프리셋 (주요 API만, 필요시 확장 가능)
                     const openaiPresets = await PresetStorage.loadAll('openai');
@@ -2035,38 +2036,37 @@ class PanelManager {
                         quickReply: quickReply,
                         regexScripts: regexScripts,
                         aiLoadingPresets: aiLoadingPresets,
+                        userSounds: userSounds,
                         presets: {
                             openai: openaiPresets,
                         },
                     };
                     
-                    // JSON 파일로 다운로드 (저장 위치 선택 가능)
+                    // JSON 파일로 다운로드 (자동 다운로드)
                     const jsonStr = JSON.stringify(allData, null, 2);
                     const blob = new Blob([jsonStr], { type: 'application/json' });
-                    const fileName = `mobile-chat-app-backup-${new Date().toISOString().split('T')[0]}.json`;
                     
-                    // downloadBlob 함수 사용 (저장 위치 선택 가능)
-                    const downloadBlobFunc = typeof window !== 'undefined' && window.downloadBlobUtil ? window.downloadBlobUtil : null;
-                    let downloadSuccess = false;
-                    if (downloadBlobFunc) {
-                        downloadSuccess = await downloadBlobFunc(blob, fileName);
-                    } else {
-                        // 폴백: 기본 다운로드 방식
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = fileName;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                        downloadSuccess = true; // 기본 다운로드 방식은 항상 성공으로 간주
-                    }
+                    // 파일명: 깡갤런처-html-날짜-시간 형식
+                    const now = new Date();
+                    const year = now.getFullYear();
+                    const month = String(now.getMonth() + 1).padStart(2, '0');
+                    const day = String(now.getDate()).padStart(2, '0');
+                    const hours = String(now.getHours()).padStart(2, '0');
+                    const minutes = String(now.getMinutes()).padStart(2, '0');
+                    const seconds = String(now.getSeconds()).padStart(2, '0');
+                    const fileName = `깡갤런처-html-${year}-${month}-${day}-${hours}-${minutes}-${seconds}.json`;
                     
-                    if (downloadSuccess) {
-                        showToast('모든 데이터가 성공적으로 내보내졌습니다.', 'success');
-                    }
-                    // 취소 시에는 메시지 표시 안 함
+                    // 기본 다운로드 방식 사용 (자동으로 다운로드 폴더에 저장)
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = fileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    
+                    showToast('모든 데이터가 성공적으로 내보내졌습니다.', 'success');
                 } catch (error) {
                     // 오류 코드 토스트 알림 표시
                     if (typeof showErrorCodeToast === 'function') {
@@ -2135,6 +2135,10 @@ class PanelManager {
                             await AILoadingStorage.savePreset(presetId, presetData);
                         }
                     }
+                    if (allData.userSounds) {
+                        // 유저 업로드 효과음 복원
+                        await UserSoundStorage.saveAll(allData.userSounds);
+                    }
                     if (allData.presets) {
                         // 프롬프트 프리셋 복원
                         if (allData.presets.openai) {
@@ -2145,10 +2149,12 @@ class PanelManager {
                         }
                     }
                     
-                    showToast('데이터가 성공적으로 가져와졌습니다. 페이지를 새로고침합니다.', 'success');
+                    showToast('데이터가 성공적으로 가져와졌습니다. 5초 후 새로고침됩니다.', 'success');
                     e.target.value = '';
-                    // 자동 새로고침
-                    location.reload();
+                    // 5초 후 자동 새로고침
+                    setTimeout(() => {
+                        location.reload();
+                    }, 5000);
                 } catch (error) {
                     // 오류 코드 토스트 알림 표시
                     if (typeof showErrorCodeToast === 'function') {
