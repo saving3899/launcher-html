@@ -297,7 +297,7 @@
 .chat-input-container {
     flex-shrink: 0;
     display: none; /* 기본적으로 숨김 */
-    align-items: flex-end;
+    align-items: center;
     gap: var(--spacing-md);
     padding: var(--spacing-md);
     /* background: var(--bg-secondary);
