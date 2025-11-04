@@ -49,12 +49,11 @@ async function createAutofillHistoryModal() {
     let buttonsHtml = '';
     for (let i = 0; i < 5; i++) {
         const content = history[i] || '';
-        const displayText = content.length > 50 ? content.substring(0, 50) + '...' : content;
         // data-content는 나중에 JavaScript로 읽으므로 JSON.stringify로 안전하게 처리
         const contentAttr = content ? `data-content="${escapeHtml(content.replace(/"/g, '&quot;'))}"` : '';
         buttonsHtml += `
             <button type="button" class="autofill-history-btn" ${contentAttr} ${!content ? 'disabled' : ''}>
-                ${content ? escapeHtml(displayText) : '(비어있음)'}
+                ${content ? escapeHtml(content) : '(비어있음)'}
             </button>
         `;
     }
