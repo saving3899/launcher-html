@@ -18,4 +18,23 @@
         max-width: 100% !important;
         width: 100% !important;
     }
+
+    .panel-controls{
+        flex-direction: column;
+        margin-bottom: 0;
+    }
+
+    .panel-controls .panel-search{
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .panel-controls .panel-search input {
+        padding-left: 35px !important;
+    }
+
+    #panel-modal-container select, #panel-modal-container select.text-input{
+        width: 100%;
+        max-width: 100%;
+    }
 }

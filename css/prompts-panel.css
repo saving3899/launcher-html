@@ -794,12 +794,16 @@
     }
     
     #panel-modal-container .flex-container {
-        flex-direction: column;
-        align-items: stretch;
+        /* flex-direction: column; */
+        /* align-items: stretch; */
     }
     
     #panel-modal-container .flex-container > .form-group {
         width: 100%;
+    }
+
+    #panel-modal-container .flex-container > div{
+        flex-direction: column;
     }
     
     #panel-modal-container .sampling-params-grid {
