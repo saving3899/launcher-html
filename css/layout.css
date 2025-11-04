@@ -300,7 +300,7 @@
     align-items: center;
     gap: var(--spacing-md);
     padding: var(--spacing-md);
-    padding-bottom: var(--spacing-lg);
+    padding-bottom: var(--spacing-xl);
     /* background: var(--bg-secondary);
     border-top: 1px solid var(--border-color); */
     z-index: 10;
