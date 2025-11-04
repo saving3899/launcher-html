@@ -8,7 +8,8 @@
  * 
  * [1] 직접 편집 (isEdit: true)
  *     - 메시지 편집 모드에서 정규식이 적용됩니다
- *     - runOnEdit이 true인 스크립트만 적용됩니다
+ *     - markdownOnly와 promptOnly가 모두 false인 스크립트는 항상 적용됩니다 (runOnEdit 무시)
+ *     - markdownOnly 또는 promptOnly가 true인 스크립트는 runOnEdit이 true일 때만 적용됩니다
  *     - isMarkdown은 undefined로 전달되어 마크다운 전용 스크립트는 적용되지 않습니다
  *     - 수정 시: saveEdit, editMessage 함수에서 isEdit: true로 전달 확인
  * 
@@ -438,13 +439,16 @@ async function getRegexedString(rawString, placement, options = {}) {
         
         // 실리태번과 정확히 동일한 조건 구조
         // (script.markdownOnly && isMarkdown) || (script.promptOnly && isPrompt) || (!script.markdownOnly && !script.promptOnly && !isMarkdown && !isPrompt)
+        // 중요: markdownOnly와 promptOnly가 모두 false인 스크립트는 "직접 편집"용이므로
+        // isMarkdown이 true일 때도 적용되어야 함 (편집하지 않은 상태에서도 표시에 적용)
         const shouldApplyEphemerality = 
             // Script applies to Markdown and input is Markdown
             (script.markdownOnly && isMarkdown) ||
             // Script applies to Generate and input is Generate
             (script.promptOnly && isPrompt) ||
-            // Script applies to all cases when neither "only"s are true, but there's no need to do it when `isMarkdown`, the as source (chat history) should already be changed beforehand
-            (!script.markdownOnly && !script.promptOnly && !isMarkdown && !isPrompt);
+            // Script applies to all cases when neither "only"s are true
+            // 중요: markdownOnly와 promptOnly가 모두 false인 스크립트는 항상 적용 (isMarkdown 여부와 무관)
+            (!script.markdownOnly && !script.promptOnly);
 
         // Ephemerality 조건을 만족하지 않으면 스킵
         if (!shouldApplyEphemerality) {
@@ -454,8 +458,16 @@ async function getRegexedString(rawString, placement, options = {}) {
         // 실리태번과 동일: 편집 모드 확인 (301-304번 라인)
         // 편집 모드일 때: runOnEdit이 true인 스크립트만 적용
         // 중요: 이 체크는 ephemerality 조건 안에 있어야 함 (실리태번 구조와 동일)
+        // 단, markdownOnly와 promptOnly가 모두 false인 스크립트는 "직접 편집"용이므로
+        // 편집 모드에서도 항상 적용되어야 함 (runOnEdit 체크 무시)
         if (options.isEdit && !script.runOnEdit) {
-            continue;
+            // markdownOnly와 promptOnly가 모두 false인 스크립트는 편집 모드에서도 적용
+            if (!script.markdownOnly && !script.promptOnly) {
+                // "직접 편집"용 스크립트는 편집 모드에서도 적용
+            } else {
+                // markdownOnly 또는 promptOnly가 true인 스크립트는 runOnEdit 체크 필요
+                continue;
+            }
         }
 
         // 실리태번과 동일: 깊이 체크 (307-316번 라인)

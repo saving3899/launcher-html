@@ -141,8 +141,9 @@ async function sendAIMessageForAutofill(userMessage, chatManager) {
     
 
     // 그리팅(첫 메시지)이 DOM에 없으면 추가
+    // 단, 메시지가 0개일 때만 그리팅 추가 (메시지가 1개 이상이면 이미 채팅이 진행 중이므로 그리팅 추가 안 함)
     const hasGreeting = chatHistory.some(m => m.role === 'assistant' && m.content && m.content.trim());
-    if (!hasGreeting) {
+    if (!hasGreeting && chatHistory.length === 0) {
         const firstMessage = character?.data?.first_mes || character?.first_mes || '';
         if (firstMessage && firstMessage.trim()) {
             // substituteParams - 전역 스코프에서 사용

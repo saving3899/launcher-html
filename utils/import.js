@@ -352,8 +352,10 @@ async function importChat(file) {
             return converted;
         });
         
-        // send_date 기준으로 정렬 (실리태번과 동일)
-        convertedMessages.sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
+        // 실리태번 JSONL 파일은 메시지가 이미 시간 순서로 저장되어 있음
+        // 따라서 파일 순서를 유지하는 것이 정확함
+        // send_date 기준으로 정렬하지 않고 파일 순서 그대로 사용
+        // (정렬하면 메시지 순서가 꼬일 수 있음)
         
         // 불러오기한 채팅의 고유 ID 생성: 원본 채팅의 create_date와 character_name 사용
         // 같은 파일을 다시 불러와도 같은 chatId를 생성하여 중복 방지

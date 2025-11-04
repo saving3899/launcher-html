@@ -21,7 +21,6 @@
 .toast {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
-    border-radius: var(--border-radius);
     box-shadow: var(--shadow-md);
     opacity: 0;
     transform: translateY(-20px);
@@ -146,33 +145,64 @@
 }
 
 /* ============================================
-   프로그래스 바 (성공/정보 토스트)
+   프로그래스 바 (모든 토스트)
    ============================================ */
 
 /* 프로그래스 바 컨테이너 */
-.toast-success .toast-progress-bar,
-.toast-info .toast-progress-bar {
+.toast .toast-progress-bar {
     position: absolute;
     bottom: 0;
     left: 0;
     right: 0;
     height: 3px;
-    background: rgba(76, 175, 80, 0.2);
     overflow: hidden;
 }
 
+/* 성공/정보 토스트 프로그래스 바 배경 */
+.toast-success .toast-progress-bar,
+.toast-info .toast-progress-bar {
+    background: rgba(76, 175, 80, 0.2);
+}
+
+/* 오류 토스트 프로그래스 바 배경 */
+.toast-error .toast-progress-bar,
+.toast-error-code .toast-progress-bar {
+    background: rgba(244, 67, 54, 0.2);
+}
+
+/* 경고 토스트 프로그래스 바 배경 */
+.toast-warning .toast-progress-bar,
+.toast-warning-code .toast-progress-bar {
+    background: rgba(255, 165, 0, 0.2);
+}
+
 /* 프로그래스 바 진행 표시 */
-.toast-success .toast-progress-fill,
-.toast-info .toast-progress-fill {
+.toast .toast-progress-fill {
     height: 100%;
-    background: var(--success-color);
     width: 0%;
     transition: width 0.1s linear;
 }
 
+/* 성공/정보 토스트 프로그래스 바 진행 표시 */
+.toast-success .toast-progress-fill,
+.toast-info .toast-progress-fill {
+    background: var(--success-color);
+}
+
+/* 오류 토스트 프로그래스 바 진행 표시 */
+.toast-error .toast-progress-fill,
+.toast-error-code .toast-progress-fill {
+    background: var(--error-color);
+}
+
+/* 경고 토스트 프로그래스 바 진행 표시 */
+.toast-warning .toast-progress-fill,
+.toast-warning-code .toast-progress-fill {
+    background: #ffa500;
+}
+
 /* 일시정지 상태 (호버 시) */
-.toast-success.toast-paused .toast-progress-fill,
-.toast-info.toast-paused .toast-progress-fill {
+.toast.toast-paused .toast-progress-fill {
     transition: none;
 }
 

@@ -267,7 +267,8 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
         // 1. DOM에 그리팅이 없고
         // 2. 메시지가 최근에 삭제되지 않았고
         // 3. IndexedDB에 저장된 메시지가 없을 때 (완전히 새로운 채팅일 때만)
-        const shouldAddGreeting = !hasGreeting && !messageDeletedRecently && !hasStoredMessages;
+        // 4. 메시지가 0개일 때만 그리팅 추가 (메시지가 1개 이상이면 이미 채팅이 진행 중이므로 그리팅 추가 안 함)
+        const shouldAddGreeting = !hasGreeting && !messageDeletedRecently && !hasStoredMessages && chatHistory.length === 0;
         
         console.log('[AIMessageSender] 그리팅 체크:', {
             hasGreeting,

@@ -43,8 +43,8 @@ function showToast(message, type = 'info') {
     // 메시지 이스케이프
     const escapedMessage = escapeHtml(message);
 
-    // 초록색 토스트(success, info)인지 확인
-    const isAutoClose = type === 'success' || type === 'info';
+    // 모든 토스트에 자동 닫힘 기능 적용
+    const isAutoClose = true;
     
     // 토스트 HTML 구성
     let toastHTML = `
@@ -59,14 +59,12 @@ function showToast(message, type = 'info') {
         </div>
     `;
     
-    // 초록색 토스트는 프로그래스 바 추가
-    if (isAutoClose) {
-        toastHTML += `
-            <div class="toast-progress-bar">
-                <div class="toast-progress-fill"></div>
-            </div>
-        `;
-    }
+    // 모든 토스트에 프로그래스 바 추가
+    toastHTML += `
+        <div class="toast-progress-bar">
+            <div class="toast-progress-fill"></div>
+        </div>
+    `;
     
     toast.innerHTML = toastHTML;
 
@@ -105,10 +103,18 @@ function showToast(message, type = 'info') {
         requestAnimationFrame(() => {
             toast.classList.add('toast-show');
             
-            // 초록색 토스트는 자동 닫기 설정
+            // 모든 토스트에 자동 닫기 설정
             if (isAutoClose) {
                 const progressFill = toast.querySelector('.toast-progress-fill');
-                const duration = 12000; // 12초
+                // 타입별 자동 닫힘 시간 설정
+                let duration;
+                if (type === 'success' || type === 'info') {
+                    duration = 5000; // 초록 토스트: 5초
+                } else if (type === 'warning' || type === 'error') {
+                    duration = 15000; // 노랑/빨강 토스트: 15초
+                } else {
+                    duration = 12000; // 기본값: 12초
+                }
                 const updateInterval = 50; // 50ms마다 업데이트
                 let totalElapsed = 0; // 누적 경과 시간
                 let lastStartTime = Date.now(); // 마지막 시작 시간
@@ -239,7 +245,10 @@ function showErrorCodeToast(errorCode, description, error = null) {
         messageText += `<br><span style="opacity: 0.8; font-size: 12px;">${escapeHtml(error.message)}</span>`;
     }
     
-    toast.innerHTML = `
+    // 모든 토스트에 자동 닫힘 기능 적용
+    const isAutoClose = true;
+    
+    let toastHTML = `
         <div class="toast-wrapper">
         <div class="toast-content">
             <div class="toast-icon">${icon}</div>
@@ -250,10 +259,31 @@ function showErrorCodeToast(errorCode, description, error = null) {
         </button>
         </div>
     `;
+    
+    // 모든 토스트에 프로그래스 바 추가
+    toastHTML += `
+        <div class="toast-progress-bar">
+            <div class="toast-progress-fill"></div>
+        </div>
+    `;
+    
+    toast.innerHTML = toastHTML;
 
     // 닫기 버튼 이벤트
     const closeBtn = toast.querySelector('.toast-close');
-    closeBtn.addEventListener('click', () => {
+    let closeTimer = null;
+    let progressTimer = null;
+    
+    // 토스트 닫기 함수
+    const closeToast = () => {
+        if (closeTimer) {
+            clearTimeout(closeTimer);
+            closeTimer = null;
+        }
+        if (progressTimer) {
+            clearInterval(progressTimer);
+            progressTimer = null;
+        }
         toast.classList.add('toast-closing');
         setTimeout(() => {
             toast.remove();
@@ -262,7 +292,9 @@ function showErrorCodeToast(errorCode, description, error = null) {
                 toastContainer.remove();
             }
         }, 300);
-    });
+    };
+    
+    closeBtn.addEventListener('click', closeToast);
 
     // 토스트 추가
     toastContainer.appendChild(toast);
@@ -271,6 +303,102 @@ function showErrorCodeToast(errorCode, description, error = null) {
     requestAnimationFrame(() => {
         requestAnimationFrame(() => {
             toast.classList.add('toast-show');
+            
+            // 모든 토스트에 자동 닫기 설정
+            if (isAutoClose) {
+                const progressFill = toast.querySelector('.toast-progress-fill');
+                if (!progressFill) {
+                    console.error('[showErrorCodeToast] 프로그래스 바를 찾을 수 없습니다:', {
+                        toastClass: toast.className,
+                        toastHTML: toast.innerHTML.substring(0, 200)
+                    });
+                    // 프로그래스 바가 없어도 백업 타이머로 자동 닫기 실행
+                }
+                // 타입별 자동 닫힘 시간 설정
+                let duration;
+                if (isError) {
+                    duration = 15000; // 오류 토스트: 15초
+                } else if (isWarning) {
+                    duration = 15000; // 경고 토스트: 15초
+                } else {
+                    duration = 12000; // 기본값: 12초
+                }
+                const updateInterval = 50; // 50ms마다 업데이트
+                let totalElapsed = 0; // 누적 경과 시간
+                let lastStartTime = Date.now(); // 마지막 시작 시간
+                let isPaused = false;
+                let backupTimerRemaining = duration; // 백업 타이머 남은 시간
+                
+                // 프로그래스 바 애니메이션 시작
+                const startProgress = () => {
+                    if (isPaused) return;
+                    if (!progressFill) {
+                        // 프로그래스 바가 없으면 백업 타이머만 사용
+                        return;
+                    }
+                    
+                    lastStartTime = Date.now();
+                    progressTimer = setInterval(() => {
+                        if (isPaused) return;
+                        if (!progressFill) return;
+                        
+                        const now = Date.now();
+                        const elapsedSinceStart = now - lastStartTime;
+                        const total = totalElapsed + elapsedSinceStart;
+                        
+                        const progress = Math.min((total / duration) * 100, 100);
+                        progressFill.style.width = progress + '%';
+                        
+                        if (progress >= 100) {
+                            clearInterval(progressTimer);
+                            if (closeTimer) clearTimeout(closeTimer);
+                            closeToast();
+                        }
+                    }, updateInterval);
+                };
+                
+                // 호버 시 일시정지/재개
+                toast.addEventListener('mouseenter', () => {
+                    if (progressTimer) {
+                        // 일시정지 시까지 경과한 시간을 누적
+                        const now = Date.now();
+                        totalElapsed += (now - lastStartTime);
+                        const elapsed = now - lastStartTime;
+                        backupTimerRemaining -= elapsed;
+                        
+                        clearInterval(progressTimer);
+                        progressTimer = null;
+                        
+                        // 백업 타이머도 일시정지
+                        if (closeTimer) {
+                            clearTimeout(closeTimer);
+                            closeTimer = null;
+                        }
+                    }
+                    isPaused = true;
+                    toast.classList.add('toast-paused');
+                });
+                
+                toast.addEventListener('mouseleave', () => {
+                    isPaused = false;
+                    toast.classList.remove('toast-paused');
+                    // 재개 시 새로운 시작 시간 기록
+                    lastStartTime = Date.now();
+                    startProgress();
+                    
+                    // 백업 타이머 재시작
+                    if (backupTimerRemaining > 0) {
+                        closeTimer = setTimeout(closeToast, backupTimerRemaining);
+                    }
+                });
+                
+                // 초기 타이머 시작
+                lastStartTime = Date.now();
+                startProgress();
+                
+                // 백업 타이머 시작 (프로그래스 바가 없어도 자동 닫기 보장)
+                closeTimer = setTimeout(closeToast, duration);
+            }
         });
     });
 }
