@@ -66,7 +66,8 @@ async function populateChatCompletion(
     { bias, quietPrompt, quietImage, type, cyclePrompt, messages, messageExamples, excludeStatusBarChoice = false },
     promptManager,
     tokenCountFn = null,
-    oaiSettings = {}
+    oaiSettings = {},
+    characterName = null // 캐릭터 이름 (정규식 적용 시 올바른 캐릭터 사용)
 ) {
     // Helper function binding
     const addToChatCompletionBound = (source, target = null) => 
@@ -91,7 +92,10 @@ async function populateChatCompletion(
             ? promptManager.serviceSettings.names_behavior 
             : 0); // 기본값: 0 (Default)
     
-    await populateChatHistory(chatHistoryMessages, prompts, chatCompletion, type, cyclePrompt, promptManager, tokenCountFn, oaiSettings, excludeStatusBarChoice, namesBehavior);
+    // 캐릭터 이름을 populateChatHistory에 전달하여 정규식 적용 시 올바른 캐릭터 사용
+    // characterName이 없으면 promptManager.configuration에서 가져오기
+    const finalCharacterName = characterName || promptManager.configuration?.name2 || null;
+    await populateChatHistory(chatHistoryMessages, prompts, chatCompletion, type, cyclePrompt, promptManager, tokenCountFn, oaiSettings, excludeStatusBarChoice, namesBehavior, finalCharacterName);
     
     // 실리태번과 동일: Character and world information을 하드코딩된 순서로 먼저 추가 (1022-1029번 라인)
     await addToChatCompletionBound('worldInfoBefore');
@@ -391,8 +395,17 @@ async function populateDialogueExamples(prompts, chatCompletion, messageExamples
  * @param {PromptManager} promptManager - PromptManager 인스턴스
  * @param {Function} [tokenCountFn] - Optional token counting function
  */
-async function populateChatHistory(messages, prompts, chatCompletion, type = null, cyclePrompt = null, promptManager, tokenCountFn = null, oaiSettings = {}, excludeStatusBarChoice = false, namesBehavior = 0) {
+async function populateChatHistory(messages, prompts, chatCompletion, type = null, cyclePrompt = null, promptManager, tokenCountFn = null, oaiSettings = {}, excludeStatusBarChoice = false, namesBehavior = 0, characterName = null) {
     const messagesArray = Array.isArray(messages) ? messages : [];
+    
+    // 디버깅: populateChatHistory에 전달되는 messages 확인
+    console.log('[populateChatHistory] 전달받은 messages:', {
+        messagesCount: messagesArray.length,
+        messagesPreview: messagesArray.map(msg => ({
+            role: msg.role,
+            contentPreview: msg.content?.substring(0, 50) || 'no-content'
+        }))
+    });
     
     // 실리태번과 동일 (786번 라인)
     // 중요: chatHistory 프롬프트가 없어도 채팅 메시지는 추가해야 함!
@@ -596,7 +609,11 @@ async function populateChatHistory(messages, prompts, chatCompletion, type = nul
         const regexPlacement = chatPrompt.role === 'user' ? REGEX_PLACEMENT.USER_INPUT : REGEX_PLACEMENT.AI_OUTPUT;
         
         // 실리태번과 동일: 프롬프트 생성 시 isPrompt: true
+        // ⚠️ 중요: characterOverride를 전달하여 올바른 캐릭터의 정규식이 적용되도록 함
+        // characterOverride가 없으면 getRegexedString 내부에서 CharacterStorage.loadCurrent()를 호출하여
+        // 잘못된 캐릭터의 정규식이 적용될 수 있음
         const regexedContent = await getRegexedString(promptContent, regexPlacement, {
+            characterOverride: characterName || undefined, // 캐릭터 이름 전달
             isMarkdown: false,
             isPrompt: true,
             depth: depth

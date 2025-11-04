@@ -523,6 +523,9 @@ class PanelManager {
             case 'data-management':
                 await this.setupDataManagementPanelEvents(panelContainer);
                 break;
+            case 'other-settings':
+                await this.setupOtherSettingsPanelEvents(panelContainer);
+                break;
             case 'status-bar-choice':
                 await this.setupStatusBarChoicePanelEvents(panelContainer);
                 break;
@@ -746,9 +749,39 @@ class PanelManager {
         const createBtn = container.querySelector('#chat-create-btn');
         if (createBtn && this.callbacks.clearChat) {
             createBtn.addEventListener('click', async () => {
-                // 새 채팅 시작 전에 현재 채팅 저장 (덮어쓰기 방지)
-                if (window.chatManager && window.chatManager.currentChatId && 
-                    window.chatManager.elements?.chatMessages?.children?.length > 0) {
+                const currentCharId = window.chatManager?.currentCharacterId;
+                if (!currentCharId) {
+                    showToast('캐릭터를 선택해주세요.', 'warning');
+                    return;
+                }
+                
+                // 현재 채팅이 있는지 확인 (메시지 개수와 관계없이 currentChatId만 확인)
+                const hasCurrentChat = !!(window.chatManager && window.chatManager.currentChatId);
+                
+                // 새 채팅 시작 확인 다이얼로그 표시
+                const result = await showNewChatConfirmModal(hasCurrentChat);
+                if (!result.confirmed) {
+                    return; // 취소됨
+                }
+                
+                // 현재 채팅 삭제 옵션이 체크되어 있으면 삭제
+                if (result.deleteCurrentChat && window.chatManager.currentChatId) {
+                    try {
+                        await ChatStorage.delete(window.chatManager.currentChatId);
+                        // 채팅 목록 패널 새로고침
+                        if (window.panelManager) {
+                            window.panelManager.refreshChatListPanel(currentCharId).catch(error => {
+                                console.debug('[PanelManager] 채팅 목록 패널 새로고침 오류:', error);
+                            });
+                        }
+                    } catch (error) {
+                        // 오류 코드 토스트 알림 표시
+                        if (typeof showErrorCodeToast === 'function') {
+                            showErrorCodeToast('ERR_PANEL_7002', '현재 채팅 삭제 중 오류가 발생했습니다', error);
+                        }
+                    }
+                } else if (hasCurrentChat) {
+                    // 현재 채팅 삭제하지 않으면 저장 (덮어쓰기 방지)
                     try {
                         await window.chatManager.saveChat();
                     } catch (error) {
@@ -2231,6 +2264,238 @@ class PanelManager {
                 }
             });
         }
+    }
+
+    /**
+     * 기타 설정 패널 이벤트 설정
+     */
+    async setupOtherSettingsPanelEvents(container) {
+        // SettingsStorage, UserSoundStorage - 전역 스코프에서 사용
+        // uuidv4 - 전역 스코프에서 사용 (promptManager.js 또는 macros.js)
+        
+        // 효과음 재생 체크박스
+        const playMessageSoundCheckbox = container.querySelector('#play-message-sound');
+        if (playMessageSoundCheckbox) {
+            playMessageSoundCheckbox.addEventListener('change', async (e) => {
+                const settings = await SettingsStorage.load();
+                settings.play_message_sound = e.target.checked;
+                await SettingsStorage.save(settings);
+            });
+        }
+        
+        // 탭 포커스 체크박스
+        const playSoundUnfocusedCheckbox = container.querySelector('#play-sound-unfocused');
+        if (playSoundUnfocusedCheckbox) {
+            playSoundUnfocusedCheckbox.addEventListener('change', async (e) => {
+                const settings = await SettingsStorage.load();
+                settings.play_sound_unfocused = e.target.checked;
+                await SettingsStorage.save(settings);
+            });
+        }
+        
+        // 효과음 셀렉트
+        const soundSelect = container.querySelector('#sound-select');
+        const soundDeleteBtn = container.querySelector('#sound-delete-btn');
+        const soundUploadBtn = container.querySelector('#sound-upload-btn');
+        const soundFileInput = container.querySelector('#sound-file-input');
+        const soundTestBtn = container.querySelector('#sound-test-btn');
+        
+        // 셀렉트 변경 시 설정 저장 및 삭제 버튼 표시/숨김
+        if (soundSelect) {
+            soundSelect.addEventListener('change', async (e) => {
+                const selectedSoundId = e.target.value;
+                const settings = await SettingsStorage.load();
+                settings.current_sound_id = selectedSoundId;
+                await SettingsStorage.save(settings);
+                
+                // 삭제 버튼 표시/숨김 (유저 업로드 효과음일 때만)
+                if (soundDeleteBtn) {
+                    if (selectedSoundId !== 'default' && !selectedSoundId.startsWith('sound_')) {
+                        const userSounds = await UserSoundStorage.loadAll();
+                        const isUserSound = userSounds && userSounds[selectedSoundId];
+                        soundDeleteBtn.style.display = isUserSound ? 'inline-flex' : 'none';
+                    } else {
+                        soundDeleteBtn.style.display = 'none';
+                    }
+                }
+                
+                // 오디오 엘리먼트 업데이트
+                await this.updateAudioElement(container, selectedSoundId);
+            });
+        }
+        
+        // 삭제 버튼
+        if (soundDeleteBtn) {
+            soundDeleteBtn.addEventListener('click', async () => {
+                const selectedSoundId = soundSelect?.value;
+                if (!selectedSoundId || selectedSoundId === 'default' || selectedSoundId.startsWith('sound_')) {
+                    return;
+                }
+                
+                // 확인 대화상자
+                const confirmed = await showConfirmModal('이 효과음을 삭제하시겠습니까?', '효과음 삭제', { confirmType: 'danger' });
+                if (!confirmed) {
+                    return;
+                }
+                
+                try {
+                    // 효과음 삭제
+                    await UserSoundStorage.delete(selectedSoundId);
+                    
+                    // 현재 선택된 효과음이 삭제된 효과음이면 기본 효과음으로 변경
+                    const settings = await SettingsStorage.load();
+                    if (settings.current_sound_id === selectedSoundId) {
+                        settings.current_sound_id = 'default';
+                        await SettingsStorage.save(settings);
+                    }
+                    
+                    // 패널 새로고침
+                    const panelHtml = await createOtherSettingsPanel();
+                    this.openPanelModal(panelHtml, 'other-settings');
+                    
+                    showToast('효과음이 삭제되었습니다.', 'success');
+                } catch (error) {
+                    showToast('효과음 삭제 중 오류가 발생했습니다: ' + error.message, 'error');
+                }
+            });
+        }
+        
+        // 업로드 버튼
+        if (soundUploadBtn && soundFileInput) {
+            soundUploadBtn.addEventListener('click', () => {
+                soundFileInput.click();
+            });
+            
+            soundFileInput.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                // 파일 크기 제한 (10MB)
+                if (file.size > 10 * 1024 * 1024) {
+                    showToast('파일 크기는 10MB를 초과할 수 없습니다.', 'error');
+                    e.target.value = '';
+                    return;
+                }
+                
+                try {
+                    // 파일을 data URL로 변환
+                    const reader = new FileReader();
+                    reader.onload = async (event) => {
+                        const dataUrl = event.target.result;
+                        
+                        // UUID 생성 (uuidv4 함수 사용)
+                        const soundId = typeof uuidv4 === 'function' ? uuidv4() : 'sound_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                        
+                        // 유저 효과음 저장
+                        await UserSoundStorage.save(soundId, {
+                            name: file.name,
+                            url: dataUrl
+                        });
+                        
+                        // 현재 선택된 효과음으로 설정
+                        const settings = await SettingsStorage.load();
+                        settings.current_sound_id = soundId;
+                        await SettingsStorage.save(settings);
+                        
+                        // 패널 새로고침
+                        const panelHtml = await createOtherSettingsPanel();
+                        this.openPanelModal(panelHtml, 'other-settings');
+                        
+                        showToast('효과음이 업로드되었습니다.', 'success');
+                    };
+                    reader.onerror = () => {
+                        showToast('파일 읽기 중 오류가 발생했습니다.', 'error');
+                        e.target.value = '';
+                    };
+                    reader.readAsDataURL(file);
+                } catch (error) {
+                    showToast('효과음 업로드 중 오류가 발생했습니다: ' + error.message, 'error');
+                    e.target.value = '';
+                }
+            });
+        }
+        
+        // 테스트 버튼
+        if (soundTestBtn) {
+            soundTestBtn.addEventListener('click', async () => {
+                // playMessageSound - 전역 스코프에서 사용
+                if (typeof playMessageSound === 'function') {
+                    await playMessageSound();
+                }
+            });
+        }
+        
+        // 메시지 전송 키 설정
+        const messageSendKeyRadios = container.querySelectorAll('input[name="message-send-key"]');
+        if (messageSendKeyRadios.length > 0) {
+            messageSendKeyRadios.forEach(radio => {
+                radio.addEventListener('change', async (e) => {
+                    const settings = await SettingsStorage.load();
+                    settings.message_send_key = e.target.value;
+                    await SettingsStorage.save(settings);
+                    
+                    // 힌트 텍스트 업데이트 (메시지 전송 설정 섹션의 힌트만)
+                    const messageSendKeyRow = container.querySelector('input[name="message-send-key"]')?.closest('.panel-setting-row');
+                    const hintText = messageSendKeyRow?.querySelector('.panel-setting-hint:last-child');
+                    if (hintText && e.target.value === 'enter') {
+                        hintText.textContent = 'Enter 키로 메시지를 전송하고, Shift+Enter로 줄바꿈합니다.';
+                    } else if (hintText && e.target.value === 'ctrl_enter') {
+                        hintText.textContent = 'Ctrl+Enter 키로 메시지를 전송하고, Enter로 줄바꿈합니다.';
+                    }
+                    
+                    // chatManager의 이벤트 리스너 재설정
+                    if (window.app && window.app.chatManager) {
+                        window.app.chatManager.setupMessageInputKeydown();
+                    }
+                });
+            });
+        }
+        
+        // 패널 로드 시 오디오 엘리먼트 초기화
+        const settings = await SettingsStorage.load();
+        const currentSoundId = settings.current_sound_id || 'default';
+        await this.updateAudioElement(container, currentSoundId);
+    }
+    
+    /**
+     * 오디오 엘리먼트 업데이트
+     */
+    async updateAudioElement(container, soundId) {
+        const audioElement = container.querySelector('#audio_message_sound');
+        if (!audioElement) return;
+        
+        let soundUrl = 'public/sounds/message.mp3'; // 기본 효과음
+        
+        if (soundId.startsWith('sound_')) {
+            // 기본 효과음 (sound_0, sound_1, ...)
+            const soundIndex = parseInt(soundId.replace('sound_', ''), 10);
+            const defaultSoundFiles = [
+                'message.mp3',
+                'Blop.mp3',
+                'Coin.mp3',
+                'Correct.mp3',
+                'Glow.mp3',
+                'Pop.mp3',
+                'Stapler.mp3',
+                'Tiny Button.mp3'
+            ].sort((a, b) => {
+                if (a === 'message.mp3') return -1;
+                if (b === 'message.mp3') return 1;
+                return a.localeCompare(b);
+            });
+            
+            if (soundIndex >= 0 && soundIndex < defaultSoundFiles.length) {
+                soundUrl = `public/sounds/${defaultSoundFiles[soundIndex]}`;
+            }
+        } else if (soundId !== 'default') {
+            // 유저 업로드 효과음 로드
+            const userSound = await UserSoundStorage.load(soundId);
+            if (userSound && userSound.url) {
+                soundUrl = userSound.url;
+            }
+        }
+        
+        audioElement.src = soundUrl;
     }
 
     /**

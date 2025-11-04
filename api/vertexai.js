@@ -278,14 +278,62 @@ async function callVertexAI({
             // 실리태번 방식: content가 없으면 output 확인
             let responseContent = candidate.content ?? candidate.output;
             
-            // responseContent가 문자열인 경우 바로 반환
+            // 추론(thought) 정보 추출을 위해 원본 데이터 보존
+            const originalData = data;
+            
+            // responseContent가 문자열인 경우
+            // 하지만 원본 데이터에서 parts를 확인해서 추론 추출 시도
             if (typeof responseContent === 'string' && responseContent.trim().length > 0) {
-                return responseContent;
+                // 원본 데이터에서 parts 확인하여 추론 추출
+                // 실리태번 방식: part.thought가 true이면 그 part의 text가 추론
+                let reasoning = '';
+                if (candidate.content && typeof candidate.content === 'object' && candidate.content.parts) {
+                    const thoughtParts = candidate.content.parts
+                        .filter(part => part && typeof part === 'object' && part.thought === true && part.text)
+                        .map(part => String(part.text));
+                    reasoning = thoughtParts.join('\n\n');
+                } else if (candidate.parts) {
+                    const thoughtParts = candidate.parts
+                        .filter(part => part && typeof part === 'object' && part.thought === true && part.text)
+                        .map(part => String(part.text));
+                    reasoning = thoughtParts.join('\n\n');
+                }
+                
+                console.log('[callVertexAI] 문자열 responseContent 처리:', {
+                    textLength: responseContent.length,
+                    textPreview: responseContent.substring(0, 200),
+                    reasoningLength: reasoning.length,
+                    reasoningPreview: reasoning.substring(0, 200),
+                    hasContentParts: !!(candidate.content?.parts),
+                    hasParts: !!candidate.parts,
+                    contentPartsCount: candidate.content?.parts?.length || 0,
+                    partsCount: candidate.parts?.length || 0
+                });
+                
+                return {
+                    text: responseContent,
+                    reasoning: reasoning,
+                    rawData: originalData // 추론 추출을 위해 원본 데이터 포함
+                };
             }
             
             // content가 없고 output이 문자열인 경우
             if (!candidate.content && candidate.output && typeof candidate.output === 'string') {
-                return candidate.output;
+                // 원본 데이터에서 parts 확인하여 추론 추출
+                // 실리태번 방식: part.thought가 true이면 그 part의 text가 추론
+                let reasoning = '';
+                if (candidate.parts) {
+                    const thoughtParts = candidate.parts
+                        .filter(part => part && typeof part === 'object' && part.thought === true && part.text)
+                        .map(part => String(part.text));
+                    reasoning = thoughtParts.join('\n\n');
+                }
+                
+                return {
+                    text: candidate.output,
+                    reasoning: reasoning,
+                    rawData: originalData
+                };
             }
             
             // responseContent가 객체인 경우 parts 확인
@@ -337,33 +385,56 @@ async function callVertexAI({
                 };
             });
             
-            // parts에서 텍스트 추출 (문자열인 경우와 객체인 경우 모두 처리)
-            const textParts = content.parts
-                .map(part => {
-                    // part가 직접 문자열인 경우
+            // parts에서 텍스트와 추론(thought) 분리 추출
+            const textParts = [];
+            const thoughtParts = [];
+            
+            content.parts.forEach(part => {
+                // part가 직접 문자열인 경우 (텍스트로 처리)
                     if (typeof part === 'string') {
-                        return part;
+                    textParts.push(part);
                     }
                     // part가 객체인 경우
-                    if (typeof part === 'object' && part !== null) {
-                        // text 속성이 명시적으로 있는 경우 (빈 문자열도 포함)
+                else if (typeof part === 'object' && part !== null) {
+                    // 실리태번 방식: part.thought가 있으면 (boolean 플래그), 그 part의 text가 추론 내용
+                    if ('thought' in part && part.thought !== null && part.thought !== undefined) {
+                        // thought가 boolean이면, 그 part의 text를 추론으로 사용
+                        if (typeof part.thought === 'boolean' && part.thought === true) {
+                            // thought가 true인 경우, 이 part의 text는 추론 내용
                         if ('text' in part && part.text !== null && part.text !== undefined) {
-                            return String(part.text); // 명시적으로 문자열로 변환
+                                thoughtParts.push(String(part.text));
+                            }
+                        } else if (typeof part.thought !== 'boolean') {
+                            // thought가 문자열이거나 객체인 경우 (구형 형식?), 추론으로 추가
+                            thoughtParts.push(String(part.thought));
                         }
-                        // thought 속성이 있는 경우도 텍스트로 처리
-                        if ('thought' in part && part.thought !== null && part.thought !== undefined) {
-                            return String(part.thought);
+                        // thought가 false거나 다른 값이면 무시
+                    }
+                    // thought가 없고 text 속성이 있는 경우 일반 메시지 텍스트로 추가
+                    else if ('text' in part && part.text !== null && part.text !== undefined) {
+                        textParts.push(String(part.text));
                         }
                     }
-                    return null;
-                })
-                .filter(text => text !== null);
+            });
 
             // 빈 문자열도 포함 (textParts에는 빈 문자열도 포함됨)
             // 실제로 내용이 있는 텍스트만 확인하기 위한 필터
             const nonEmptyTextParts = textParts.filter(text => text && text.trim().length > 0);
             
+            // 추론(thought) 추출
+            const reasoning = thoughtParts.length > 0 ? thoughtParts.join('\n\n') : '';
+            
             if (nonEmptyTextParts.length === 0 && !hasFunctionCall && !hasInlineData) {
+                // 추론만 있고 텍스트가 없는 경우 (정상적인 경우일 수 있음)
+                if (thoughtParts.length > 0 && textParts.length === 0) {
+                    // 빈 텍스트와 추론 반환
+                    return {
+                        text: '',
+                        reasoning: reasoning,
+                        rawData: originalData
+                    };
+                }
+                
                 // textParts에 빈 문자열이 있는 경우 (finishReason이 STOP이면 정상 응답일 수 있음)
                 if (textParts.length > 0 && textParts.every(text => text === '')) {
                     // 경고 코드 토스트 알림 표시
@@ -371,12 +442,20 @@ async function callVertexAI({
                         showErrorCodeToast('WARN_API_20001', `Vertex AI가 빈 응답 반환 (finishReason: ${candidate.finishReason})`);
                     }
                     // 빈 문자열 반환 (사용자에게 표시될 것)
-                    return '';
+                    return {
+                        text: '',
+                        reasoning: reasoning,
+                        rawData: originalData
+                    };
                 }
                 
                 // MAX_TOKENS인 경우 빈 문자열 반환
                 if (candidate.finishReason === 'MAX_TOKENS') {
-                    return '';
+                    return {
+                        text: '',
+                        reasoning: reasoning,
+                        rawData: originalData
+                    };
                 }
                 
                 // Safety rating 확인
@@ -429,11 +508,15 @@ async function callVertexAI({
                 if (typeof showErrorCodeToast === 'function') {
                     showErrorCodeToast('WARN_API_20002', 'Vertex AI 텍스트 없지만 functionCall 또는 inlineData 존재');
                 }
-                return ''; // 빈 문자열 반환 또는 적절한 처리
+                return {
+                    text: '',
+                    reasoning: reasoning,
+                    rawData: originalData
+                };
             }
 
             // 텍스트 추출
-            const finalText = nonEmptyTextParts.join('\n\n');
+            const finalText = textParts.join('\n\n');
             
             // finishReason 확인 및 로깅
             if (candidate.finishReason === 'MAX_TOKENS' && finalText.length >= 20) {
@@ -443,7 +526,12 @@ async function callVertexAI({
                 }
             }
 
-            return finalText;
+            // 추론 정보를 포함한 객체 반환
+            return {
+                text: finalText,
+                reasoning: reasoning, // 추론 내용 (thought)
+                rawData: originalData // 추론 추출을 위해 원본 데이터 포함
+            };
         }
     } catch (error) {
         if (error.name === 'AbortError') {

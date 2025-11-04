@@ -397,9 +397,72 @@ function messageFormatting(text, userName = '', charName = '') {
     return html;
 }
 
+/**
+ * ====================================================================================
+ * ⚠️ 중요: 상호 의존성이 높은 기능들 관리 가이드
+ * ====================================================================================
+ * 
+ * 이 클래스에는 서로 강하게 연결된 6가지 핵심 기능이 있습니다.
+ * 하나를 수정할 때 다른 기능에 영향을 주지 않도록 반드시 다음 사항을 확인하세요.
+ * 
+ * [1] 정규식 (regexEngine.js)
+ *     - 모든 메시지 렌더링 시 적용됨
+ *     - loadChat, loadMoreMessagesFromStart, addMessage, saveEdit, cancelEdit에서 호출
+ *     - 직접 편집: isEdit: true (runOnEdit이 true인 스크립트만 적용)
+ *     - 형식 표시만: isMarkdown: true (markdownOnly가 true인 스크립트만 적용)
+ *     - 형식 프롬프트만: isPrompt: true (promptOnly가 true인 스크립트만 적용)
+ *     - Replace With 공백: 빈 문자열이면 매칭된 부분 삭제 (의도적 동작)
+ *     - ⚠️ 중요: HTML 렌더링 제한보다 먼저 적용되지만, 렌더링 제한에 의해 플레이스홀더로 표시될 수 있음
+ *     - 변경 시: 메시지 렌더링 로직에 영향
+ * 
+ * [2] 채팅 로드 수 제한 (messagesToLoad)
+ *     - loadChat()에서 설정값 읽어서 최근 N개만 표시
+ *     - startIndex 계산: if (chat.length > count) { startIndex = chat.length - count; }
+ *     - 변경 시: 더보기 버튼 표시 여부에 영향
+ * 
+ * [3] 더보기 기능 (loadMoreMessagesFromStart)
+ *     - loadChat에서 startIndex > 0이면 더보기 버튼 추가
+ *     - 더보기 클릭 시: startIndex부터 이전 messagesToLoad개 로드
+ *     - 변경 시: loadChat의 startIndex 계산과 연동되어야 함
+ * 
+ * [4] HTML 렌더링 제한 (htmlRenderLimit)
+ *     - loadChat, loadMoreMessagesFromStart, saveEdit, cancelEdit 모두에서 적용
+ *     - 역순 인덱스 기준으로 최근 N개만 렌더링, 나머지는 플레이스홀더
+ *     - ⚠️ 중요: 정규식보다 우선 적용됨 (정규식은 먼저 적용되지만 렌더링 제한에 의해 플레이스홀더로 표시)
+ *     - 정규식이 적용된 HTML 콘텐츠도 렌더링 제한에 따라 플레이스홀더로 표시됨
+ *     - 변경 시: 모든 메시지 렌더링 함수에서 정규식 적용 후 HTML 렌더링 제한 적용 순서 유지
+ * 
+ * [5] 채팅 파일 불러오기 (importChat in utils/import.js)
+ *     - 불러온 채팅은 imported_date를 lastMessageDate로 설정하여 최신순 정렬
+ *     - loadChat() 호출 후 character.chat 업데이트 필수 (불러온 채팅이 가장 최근이 되도록)
+ *     - 변경 시: loadOrCreateChat의 정렬 로직과 연동 확인
+ * 
+ * [6] 가장 최근 채팅 불러오기 / 새 채팅 생성 (loadOrCreateChat)
+ *     - character.chat을 우선 찾고, 없으면 imported_date 기준 최신순 정렬 후 가장 최근 채팅 사용
+ *     - 채팅이 없으면 createNewChat() 호출
+ *     - 변경 시: importChat의 character.chat 업데이트와 연동 확인
+ * 
+ * ⚠️ 수정 시 체크리스트:
+ * 1. loadChat 수정 시 → 더보기 버튼 표시 로직, htmlRenderLimit 적용 확인
+ *    * 정규식 적용 후 HTML 렌더링 제한 적용 순서 유지
+ * 2. loadMoreMessagesFromStart 수정 시 → loadChat의 startIndex 계산과 일치 확인
+ *    * 정규식 적용 후 HTML 렌더링 제한 적용 순서 유지
+ * 3. saveEdit 수정 시 → 정규식 적용(isEdit: true) 후 HTML 렌더링 제한 적용 확인
+ * 4. cancelEdit 수정 시 → 정규식 적용(isMarkdown: true) 후 HTML 렌더링 제한 적용 확인
+ * 5. importChat 수정 시 → loadChat에서 character.chat 업데이트 확인
+ * 6. loadOrCreateChat 수정 시 → imported_date 정렬 로직 확인
+ * 7. saveChat 수정 시 → DOM 메시지와 저장소 메시지 병합 로직 확인
+ * 
+ * ====================================================================================
+ */
+
 class ChatManager {
     constructor(elements) {
         this.elements = elements;
+        // 메시지 입력창 이벤트 리스너 저장 (제거를 위해)
+        this._messageInputKeydownHandler = null;
+        this._messageInputInputHandler = null;
+        this._messageInputBlurHandler = null;
         this.abortController = null;
         this.isGenerating = false;
         this.currentChatId = null;
@@ -411,6 +474,8 @@ class ChatManager {
         // 실리태번과 동일: chat 배열로 메시지 관리 (인덱스 0부터 시작)
         this.chat = [];
         this.chat_metadata = {}; // 실리태번과 동일: chat_metadata
+        this._messageDeletedRecently = false; // 메시지가 최근에 삭제되었는지 추적 (그리팅 추가 방지용)
+        this._deletedMessageUuids = new Set(); // 삭제된 메시지 UUID 추적 (regenerateMessage, deleteMessage 등)
         this.setupEventListeners();
         this.setupAutofillButton();
         this.aiLoader = document.getElementById('ai-loader');
@@ -424,8 +489,38 @@ class ChatManager {
     /**
      * AI 로더 표시/숨김
      * @param {boolean} show - 표시 여부
+     * @param {boolean} generationSuccess - 생성 성공 여부 (show가 false일 때만 사용, 효과음 재생용)
      */
-    async showAILoader(show) {
+    async showAILoader(show, generationSuccess = false) {
+        // show = false일 때는 즉시 실행 (백그라운드 탭에서도 작동)
+        if (!show) {
+            // 로더 숨김 (즉시 실행, await 없이)
+            if (!this.aiLoader) {
+                this.aiLoader = document.getElementById('ai-loader');
+            }
+            
+            if (this.aiLoader) {
+                this.aiLoader.classList.add('hidden');
+            }
+            
+            // AI 응답 완료 시 효과음 재생 (정상 완료 시에만, 실리태번과 동일)
+            // AI 로더가 사라지는 타이밍과 같음
+            // 비동기로 실행하여 UI 업데이트를 블로킹하지 않음
+            if (generationSuccess) {
+                // playMessageSound - 전역 스코프에서 사용
+                // await 없이 비동기로 실행 (탭 포커스와 관계없이 UI는 즉시 업데이트됨)
+                if (typeof playMessageSound === 'function') {
+                    playMessageSound().catch((error) => {
+                        console.debug('[showAILoader] 효과음 재생 중 오류 (무시):', error);
+                    });
+                }
+            }
+            
+            // CSS는 유지 (다른 곳에서 사용할 수도 있으므로)
+            return; // 즉시 반환하여 UI 업데이트를 블로킹하지 않음
+        }
+        
+        // show = true일 때만 비동기 작업 수행
         // AILoadingStorage - 전역 스코프에서 사용
         const enabled = await AILoadingStorage.loadEnabled();
         
@@ -552,9 +647,6 @@ class ChatManager {
             this.aiLoader.appendChild(wrapper);
             
             this.aiLoader.classList.remove('hidden');
-        } else {
-            this.aiLoader.classList.add('hidden');
-            // CSS는 유지 (다른 곳에서 사용할 수도 있으므로)
         }
     }
     
@@ -796,20 +888,122 @@ class ChatManager {
             this.sendMessage();
         });
 
-        // Enter 키로 전송 (Shift+Enter는 줄꿈)
-        this.elements.messageInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                this.sendMessage();
-            }
-        });
+        // 메시지 전송 키보드 단축키 설정 (높이 자동 조절 포함)
+        this.setupMessageInputKeydown();
+    }
 
-        // 입력창 내용 변경 시 전송 버튼 활성화/비활성화
-        this.elements.messageInput.addEventListener('input', () => {
-            // 생성 중이 아니면 버튼 상태 업데이트
-            if (!this.isGenerating) {
-                this.updateSendButtonState();
+    /**
+     * 메시지 입력창 키보드 이벤트 설정
+     * 설정에 따라 Enter 또는 Ctrl+Enter로 전송
+     */
+    setupMessageInputKeydown() {
+        // SettingsStorage - 전역 스코프에서 사용
+        SettingsStorage.load().then(settings => {
+            const messageSendKey = settings.message_send_key || 'enter';
+            
+            // 기존 이벤트 리스너 제거
+            if (this._messageInputKeydownHandler) {
+                this.elements.messageInput.removeEventListener('keydown', this._messageInputKeydownHandler);
             }
+            if (this._messageInputInputHandler) {
+                this.elements.messageInput.removeEventListener('input', this._messageInputInputHandler);
+            }
+            if (this._messageInputBlurHandler) {
+                this.elements.messageInput.removeEventListener('blur', this._messageInputBlurHandler);
+            }
+            
+            // 높이 자동 조절 함수 (전역 함수 재사용 또는 새로 생성)
+            const adjustHeight = typeof window !== 'undefined' && window.messageInputHeightAdjust 
+                ? window.messageInputHeightAdjust 
+                : () => {
+                    const value = this.elements.messageInput.value || '';
+                    
+                    // 빈 내용이면 최소 높이로 고정
+                    if (value.trim() === '') {
+                        this.elements.messageInput.style.height = '44px';
+                        this.elements.messageInput.style.overflowY = 'hidden';
+                        return;
+                    }
+                    
+                    // 줄바꿈이 없는 한 줄인지 확인
+                    const hasNewline = value.includes('\n');
+                    
+                    // 최소/최대 높이
+                    const minHeight = 44;
+                    const maxHeight = window.innerHeight * 0.4; // 40vh
+                    
+                    // 한 줄이면 무조건 최소 높이로 고정 (여백 방지)
+                    if (!hasNewline) {
+                        this.elements.messageInput.style.height = `${minHeight}px`;
+                        this.elements.messageInput.style.overflowY = 'hidden';
+                        return;
+                    }
+                    
+                    // 여러 줄인 경우에만 scrollHeight 측정
+                    // 높이를 auto로 설정하여 scrollHeight 정확히 측정
+                    this.elements.messageInput.style.height = 'auto';
+                    
+                    // scrollHeight 측정
+                    const scrollHeight = this.elements.messageInput.scrollHeight;
+                    
+                    // 최소/최대 높이 적용
+                    const newHeight = Math.max(minHeight, Math.min(scrollHeight, maxHeight));
+                    
+                    // 높이 설정
+                    this.elements.messageInput.style.height = `${newHeight}px`;
+                    
+                    // 최대 높이에 도달하면 스크롤 가능하도록
+                    if (scrollHeight > maxHeight) {
+                        this.elements.messageInput.style.overflowY = 'auto';
+                    } else {
+                        this.elements.messageInput.style.overflowY = 'hidden';
+                    }
+                };
+            
+            // CSS 스타일 설정 (높이 자동 조절을 위해)
+            this.elements.messageInput.style.resize = 'none';
+            this.elements.messageInput.style.overflow = 'hidden';
+            this.elements.messageInput.style.minHeight = '44px';
+            this.elements.messageInput.style.maxHeight = '40vh';
+            
+            // 초기 높이 설정
+            adjustHeight();
+            
+            // 키보드 이벤트 핸들러
+            this._messageInputKeydownHandler = (e) => {
+                if (messageSendKey === 'enter') {
+                    // Enter 키로 전송 (Shift+Enter는 줄꿈)
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        this.sendMessage();
+                    }
+                } else if (messageSendKey === 'ctrl_enter') {
+                    // Ctrl+Enter 키로 전송 (Enter는 줄꿈)
+                    if (e.key === 'Enter' && e.ctrlKey) {
+                        e.preventDefault();
+                        this.sendMessage();
+                    }
+                }
+            };
+            
+            // 입력 이벤트 핸들러
+            this._messageInputInputHandler = () => {
+                // 높이 자동 조절
+                adjustHeight();
+                
+                // 전송 버튼 상태 업데이트
+                if (!this.isGenerating) {
+                    this.updateSendButtonState();
+                }
+            };
+            
+            // 블러 이벤트 핸들러
+            this._messageInputBlurHandler = adjustHeight;
+            
+            // 새로운 이벤트 리스너 추가
+            this.elements.messageInput.addEventListener('keydown', this._messageInputKeydownHandler);
+            this.elements.messageInput.addEventListener('input', this._messageInputInputHandler);
+            this.elements.messageInput.addEventListener('blur', this._messageInputBlurHandler);
         });
     }
 
@@ -823,12 +1017,13 @@ class ChatManager {
         // 생성 중이든 아니든 항상 활성화
         this.elements.sendBtn.disabled = false;
         
-        // 아이콘 상태 업데이트
+        // 아이콘 상태 업데이트 (isGenerating 플래그를 직접 확인하여 즉시 반영)
         if (this.isGenerating) {
             // 생성 중: 정지 버튼
             this.updateSendButtonIcon('stop');
         } else {
             // 생성 중 아님: 입력창 텍스트와 마지막 메시지 타입에 따라 아이콘 결정
+            // getChatHistory는 동기 함수이지만 DOM 접근이므로 백그라운드에서도 즉시 실행됨
             const hasText = this.elements.messageInput.value.trim().length > 0;
             const chatHistory = this.getChatHistory();
             const lastMessage = chatHistory.length > 0 ? chatHistory[chatHistory.length - 1] : null;
@@ -992,6 +1187,15 @@ class ChatManager {
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
                 modalContainer.classList.remove('hidden');
+                
+                // 모달이 표시된 후 textarea에 자동 focus
+                const contentInput = modalContainer.querySelector('#autofill-content-input');
+                if (contentInput) {
+                    // 약간의 지연 후 focus (애니메이션 완료 대기)
+                    setTimeout(() => {
+                        contentInput.focus();
+                    }, 100);
+                }
             });
         });
 
@@ -1111,6 +1315,7 @@ class ChatManager {
             return;
         }
 
+        let autofillSuccess = false; // finally 블록에서 접근 가능하도록 try 블록 밖에서 선언
         try {
             // AbortController 생성 및 버튼 상태 변경
             this.abortController = new AbortController();
@@ -1123,8 +1328,6 @@ class ChatManager {
 
             // AI 응답 생성 (일반 메시지 전송과 동일한 프롬프트 사용)
             const responseText = await this.generateAIResponseForAutofill(prompt);
-
-
             // AI 응답을 message-input에 입력 (실리태번 impersonate와 동일)
             if (responseText && responseText.trim()) {
                 const trimmedResponse = responseText.trim();
@@ -1157,6 +1360,7 @@ class ChatManager {
                 // 전송 버튼 활성화
                 this.elements.sendBtn.disabled = false;
                 
+                autofillSuccess = true; // 정상 완료
             } else {
                 // 경고 코드 토스트 알림 표시
                 if (typeof showErrorCodeToast === 'function') {
@@ -1183,12 +1387,44 @@ class ChatManager {
                 alert('대필 실행 중 오류가 발생했습니다: ' + error.message);
             }
         } finally {
-            await this.showAILoader(false); // AI 로더 숨김
+            // 백그라운드 탭에서도 즉시 반영되도록 최우선으로 UI 업데이트
+            // 1. 플래그 즉시 설정
             this.abortController = null;
             this.isGenerating = false;
-            this.updateSendButtonIcon('play');
+            
+            // 2. 버튼 아이콘 직접 변경 (DOM 조작, 동기적 즉시 실행)
+            const icon = document.getElementById('send-btn-icon');
+            if (icon) {
+                icon.className = 'fa-solid fa-play';
+                if (this.elements.sendBtn) {
+                    this.elements.sendBtn.classList.remove('generating');
+                }
+            }
+            
+            // 3. AI 로더 직접 숨김 (DOM 조작, 동기적 즉시 실행)
+            if (!this.aiLoader) {
+                this.aiLoader = document.getElementById('ai-loader');
+            }
+            if (this.aiLoader) {
+                this.aiLoader.classList.add('hidden');
+            }
+            
+            // 4. 대필 버튼 상태 업데이트
             this.updateAutofillButtonState();
-            this.updateSendButtonState();
+            
+            // 5. 효과음 재생 (비동기, await 없이)
+            if (autofillSuccess && typeof playMessageSound === 'function') {
+                playMessageSound().catch((error) => {
+                    console.debug('[executeAutofill] 효과음 재생 중 오류 (무시):', error);
+                });
+            }
+            
+            // 6. 정확한 버튼 상태 업데이트 (나중에 실행)
+            Promise.resolve().then(() => {
+                this.updateSendButtonState();
+            }).catch((error) => {
+                console.debug('[executeAutofill] updateSendButtonState 중 오류 (무시):', error);
+            });
         }
     }
 
@@ -1221,13 +1457,36 @@ class ChatManager {
             // 상태 초기화는 나중에 (에러 처리 후)
             // abortController를 null로 설정하면 signal에 접근할 수 없으므로 일단 유지
             
-            // AI 로더 숨김
-            await this.showAILoader(false);
+            // 백그라운드 탭에서도 즉시 반영되도록 최우선으로 UI 업데이트
+            // 1. 플래그 즉시 설정
+            this.isGenerating = false;
             
-            // 버튼 상태 업데이트
-            this.updateSendButtonIcon('play');
+            // 2. 버튼 아이콘 직접 변경 (DOM 조작, 동기적 즉시 실행)
+            const icon = document.getElementById('send-btn-icon');
+            if (icon) {
+                icon.className = 'fa-solid fa-play';
+                if (this.elements.sendBtn) {
+                    this.elements.sendBtn.classList.remove('generating');
+                }
+            }
+            
+            // 3. AI 로더 직접 숨김 (DOM 조작, 동기적 즉시 실행)
+            if (!this.aiLoader) {
+                this.aiLoader = document.getElementById('ai-loader');
+            }
+            if (this.aiLoader) {
+                this.aiLoader.classList.add('hidden');
+            }
+            
+            // 4. 대필 버튼 상태 업데이트
             this.updateAutofillButtonState();
-            this.updateSendButtonState();
+            
+            // 5. 정확한 버튼 상태 업데이트 (나중에 실행)
+            Promise.resolve().then(() => {
+                this.updateSendButtonState();
+            }).catch((error) => {
+                console.debug('[abortGeneration] updateSendButtonState 중 오류 (무시):', error);
+            });
         }
     }
 
@@ -1342,8 +1601,14 @@ class ChatManager {
             // addMessage 내부에서는 표시용으로 추가 정규식 적용 (markdownOnly 정규식 등)
             await this.addMessage(processedUserMessage, 'user', null, null, [], 0, userAvatar);
 
-            // DOM 업데이트 완료 대기 (addMessage 후 DOM이 반영될 시간 확보)
-            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            // DOM 업데이트 완료 대기 (백그라운드 탭에서도 작동)
+            // waitForDOMUpdate - 전역 스코프에서 사용
+            if (typeof waitForDOMUpdate === 'function') {
+                await waitForDOMUpdate();
+            } else {
+                // 폴백: requestAnimationFrame 사용
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            }
         }
 
         // 입력창 초기화
@@ -1363,8 +1628,10 @@ class ChatManager {
         await this.showAILoader(true); // AI 로더 표시
 
         // AI 응답 처리
+        let generationSuccess = false;
         try {
             await this.generateAIResponse(userMessageToSend, generateType);
+            generationSuccess = true; // 정상 완료
         } catch (error) {
             // AbortError 또는 사용자 정지 버튼 클릭은 정상적인 중단이므로 에러 메시지 표시하지 않음
             // AbortError는 error.name이 'AbortError'이거나, signal.aborted가 true이거나,
@@ -1397,13 +1664,46 @@ class ChatManager {
         } finally {
         // 생성 완료 또는 중단 시 상태 초기화
         // abortGeneration에서 이미 로더를 숨겼지만, finally에서도 확실히 처리
-        await this.showAILoader(false); // AI 로더 숨김 (이중 안전장치)
+        
+        // 백그라운드 탭에서도 즉시 반영되도록 최우선으로 UI 업데이트
+        // 1. 플래그 즉시 설정 (가장 중요)
         this.abortController = null;
         this.isGenerating = false;
-        this.updateSendButtonIcon('play');
+        
+        // 2. 버튼 아이콘 직접 변경 (DOM 조작, 동기적 즉시 실행)
+        const icon = document.getElementById('send-btn-icon');
+        if (icon) {
+            icon.className = 'fa-solid fa-play';
+            if (this.elements.sendBtn) {
+                this.elements.sendBtn.classList.remove('generating');
+            }
+        }
+        
+        // 3. AI 로더 직접 숨김 (DOM 조작, 동기적 즉시 실행)
+        if (!this.aiLoader) {
+            this.aiLoader = document.getElementById('ai-loader');
+        }
+        if (this.aiLoader) {
+            this.aiLoader.classList.add('hidden');
+        }
+        
+        // 4. 대필 버튼 상태 업데이트 (동기 함수)
         this.updateAutofillButtonState();
-        // 버튼 상태 업데이트 (채팅 메시지 개수 확인)
-        this.updateSendButtonState();
+        
+        // 5. 효과음 재생 (비동기, await 없이)
+        if (generationSuccess && typeof playMessageSound === 'function') {
+            playMessageSound().catch((error) => {
+                console.debug('[sendMessage] 효과음 재생 중 오류 (무시):', error);
+            });
+        }
+        
+        // 6. 정확한 버튼 상태 업데이트 (나중에 실행, getChatHistory 호출 포함)
+        // 백그라운드에서도 작동하도록 비동기로 실행
+        Promise.resolve().then(() => {
+            this.updateSendButtonState();
+        }).catch((error) => {
+            console.debug('[sendMessage] updateSendButtonState 중 오류 (무시):', error);
+        });
         }
     }
 
@@ -1434,10 +1734,27 @@ class ChatManager {
     getChatHistory() {
         const history = [];
         // 중요: querySelectorAll은 display:none이나 hidden 클래스가 있어도 모든 요소를 반환함
-        // 따라서 숨겨진 메시지도 채팅 히스토리에 포함됨
+        // 하지만 삭제된 메시지는 DOM에서 완전히 제거되므로 querySelectorAll로는 찾을 수 없음
+        // 따라서 DOM에서 찾은 메시지만 채팅 히스토리에 포함됨
         const messageWrappers = this.elements.chatMessages.querySelectorAll('.message-wrapper');
         
+        // 디버깅: getChatHistory 호출 시점의 메시지 수 확인
+        // console.debug 대신 console.log 사용하여 필터링되지 않도록 함
+        console.log('[ChatManager.getChatHistory] DOM에서 메시지 읽기:', {
+            wrapperCount: messageWrappers.length,
+            chatArrayLength: this.chat?.length || 0,
+            // 실제 wrapper의 UUID 확인
+            wrapperUuids: Array.from(messageWrappers).map(w => w.dataset.messageUuid?.substring(0, 8) || 'no-uuid')
+        });
+        
         messageWrappers.forEach((wrapper) => {
+            // 삭제된 메시지는 parentNode가 없거나 chatMessages의 자식이 아닐 수 있음
+            // 하지만 remove() 호출 후에는 querySelectorAll로 찾을 수 없으므로 이 체크는 사실상 불필요
+            // 안전장치로 추가
+            if (!wrapper.parentNode || !this.elements.chatMessages.contains(wrapper)) {
+                return; // DOM에서 제거된 메시지는 건너뜀
+            }
+            
             const messageDiv = wrapper.querySelector('.message');
             if (!messageDiv) return;
 
@@ -1460,6 +1777,10 @@ class ChatManager {
                     content: originalText,
                     _sendDate: sendDate, // 정렬용 (내부 사용)
                 };
+                
+                // 실리태번과 동일: 추론(thinking)은 채팅 히스토리에 포함하지 않음
+                // 추론은 message.extra.reasoning에 저장되지만, content에는 포함되지 않음
+                // 따라서 getChatHistory에서도 추론을 제외하고 content만 반환
                 
                 // 실리태번과 동일: force_avatar 추가
                 const forceAvatar = wrapper.dataset.forceAvatar || null;
@@ -1487,13 +1808,36 @@ class ChatManager {
         // 정렬 후 _sendDate 제거 (내부용이므로 반환값에서 제외)
         history.forEach(msg => delete msg._sendDate);
 
+        // 디버깅: 반환되는 히스토리 확인
+        // console.debug 대신 console.log 사용하여 필터링되지 않도록 함
+        if (history.length > 0) {
+            const historyPreview = history.map(msg => ({
+                role: msg.role,
+                contentPreview: msg.content?.substring(0, 50) || 'no-content',
+                uuid: msg.uuid?.substring(0, 8) || 'no-uuid'
+            }));
+            console.log('[ChatManager.getChatHistory] ✅ 반환되는 히스토리:', {
+                historyCount: history.length,
+                historyPreview: historyPreview
+            });
+        } else {
+            console.log('[ChatManager.getChatHistory] ✅ 히스토리 비어있음 (메시지 0개)');
+        }
+
         return history;
     }
 
     /**
-     * "더보기" 버튼 추가
-     * @param {number} startIndex - 로드 시작할 메시지 인덱스
-     * @param {string} chatId - 채팅 ID (옵션, 저장된 채팅 데이터가 있으면 사용)
+     * 더보기 버튼 추가
+     * 
+     * ⚠️ 중요: loadChat에서 startIndex > 0일 때 호출됩니다.
+     * 
+     * [연동 기능]
+     * - loadChat: startIndex 계산 후 startIndex > 0이면 이 함수 호출
+     * - loadMoreMessagesFromStart: 버튼 클릭 시 호출되어 이전 메시지 로드
+     * 
+     * @param {number} startIndex - 숨겨진 메시지의 시작 인덱스 (loadChat에서 계산된 값)
+     * @param {string} chatId - 채팅 ID (없으면 현재 채팅 ID 사용)
      */
     async addLoadMoreButton(startIndex, chatId = null) {
         // 기존 "더보기" 버튼이 있으면 제거
@@ -1553,8 +1897,13 @@ class ChatManager {
             shownCount++;
         }
         
-        // DOM 업데이트 완료 대기
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        // DOM 업데이트 완료 대기 (백그라운드 탭에서도 작동)
+        // waitForDOMUpdate - 전역 스코프에서 사용
+        if (typeof waitForDOMUpdate === 'function') {
+            await waitForDOMUpdate();
+        } else {
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        }
         
         // 새로 표시된 메시지들의 총 높이 계산 (표시 후)
         let totalAddedHeight = loadMoreBtnHeight;
@@ -1579,6 +1928,32 @@ class ChatManager {
      * 시작 인덱스부터 이전 메시지 로드 (성능 최적화용)
      * @param {number} startIndex - 로드 시작할 메시지 인덱스
      * @param {string} chatId - 채팅 ID (옵션)
+     */
+    /**
+     * 더보기 기능: 이전 메시지 로드
+     * 
+     * ⚠️ 중요: 이 함수는 loadChat과 강하게 연동되어 있습니다.
+     * 
+     * [연동 기능]
+     * 1. loadChat의 startIndex: 이 함수의 startIndex는 loadChat에서 계산된 값
+     * 2. messagesToLoad 설정: 한 번에 로드할 메시지 수 (loadChat과 동일한 설정값 사용)
+     * 3. htmlRenderLimit: 역순 인덱스 기준으로 최근 N개만 HTML 렌더링 (loadChat과 동일 로직)
+     *    * ⚠️ 중요: HTML 렌더링 제한이 정규식보다 우선 적용됨
+     *    * 정규식은 먼저 적용되지만, 렌더링 제한에 의해 최근 N개가 아닌 메시지는 플레이스홀더로 표시됨
+     * 4. 정규식: 모든 메시지 렌더링 시 getRegexedString 호출 (loadChat과 동일, isMarkdown: true)
+     *    * 정규식 적용 후 HTML 렌더링 제한 적용
+     * 
+     * [수정 시 주의사항]
+     * - endIndex 계산 변경 시 → loadChat의 startIndex 계산과 일치해야 함
+     *   * endIndex = Math.max(1, startIndex - messagesToLoad)
+     *   * loadChat: if (chat.length > count) { startIndex = chat.length - count; }
+     * - htmlRenderLimit 적용 변경 시 → loadChat의 applyHtmlRenderLimit과 동일한 로직 사용
+     *   * ⚠️ 중요: 정규식 적용 후 HTML 렌더링 제한 적용 순서 유지
+     * - 스크롤 위치 고정 로직 변경 시 → 메시지 추가 위치 확인
+     * - 정규식과 HTML 렌더링 제한: 모든 메시지 렌더링 시 정규식 적용 후 HTML 렌더링 제한 적용
+     * 
+     * @param {number} startIndex - 로드할 메시지의 시작 인덱스 (loadChat에서 계산된 값)
+     * @param {string} chatId - 채팅 ID (없으면 현재 채팅 ID 사용)
      */
     async loadMoreMessagesFromStart(startIndex, chatId = null) {
         // 더보기 로딩 중 플래그 설정 (저장 방지)
@@ -1643,6 +2018,10 @@ class ChatManager {
         const loadMoreBtn = chatContainer.querySelector('.load-more-messages-btn');
         const loadMoreBtnHeight = loadMoreBtn ? (loadMoreBtn.offsetHeight || 0) : 0;
         
+        // 스크롤 위치 고정을 위한 참조 요소: 더보기 버튼이 있으면 더보기 버튼, 없으면 첫 번째 메시지
+        // 더보기 버튼이 제거될 수 있으므로 첫 번째 메시지도 함께 저장
+        const firstMessageBeforeLoad = chatContainer.querySelector('.message-wrapper');
+        
         // 설정에서 로딩할 메시지 수 가져오기 (한 번에 로드할 메시지 수)
         const settings = await SettingsStorage.load();
         const messagesToLoad = settings.messagesToLoad ?? 50; // 기본값 50개씩
@@ -1668,6 +2047,15 @@ class ChatManager {
         
         // 첫 번째 메시지 찾기 (위에 추가할 위치)
         const firstMessage = chatContainer.querySelector('.message-wrapper');
+        
+        // 스크롤 위치 고정을 위한 참조 요소: 더보기 버튼이 있으면 더보기 버튼, 없으면 첫 번째 메시지
+        // 더보기 버튼이 제거될 수 있으므로 첫 번째 메시지를 참조 요소로 사용
+        const referenceElement = firstMessageBeforeLoad || firstMessage;
+        let referenceElementTop = 0;
+        if (referenceElement) {
+            const rect = referenceElement.getBoundingClientRect();
+            referenceElementTop = rect.top + chatContainer.scrollTop;
+        }
         
         // 기존 DOM 메시지의 UUID 집합 (중복 방지용)
         const existingUuids = new Set();
@@ -1803,8 +2191,20 @@ class ChatManager {
                 message.extra?.swipes || [],
                 0,
                 message.is_user ? userAvatar : null,
-                sendDate || null // send_date 전달
+                sendDate || null, // send_date 전달
+                message.extra?.reasoning || null // 추론 내용 복원
             );
+            
+            // addMessage는 DOM에 자동으로 추가하므로, 더보기에서는 제거하여 나중에 한 번에 추가
+            if (wrapper.parentNode) {
+                wrapper.parentNode.removeChild(wrapper);
+            }
+            
+            // 더보기로 로드하는 메시지는 애니메이션 제거 (실제 새 메시지가 아닌 이미 존재하는 메시지)
+            const messageDiv = wrapper.querySelector('.message');
+            if (messageDiv) {
+                messageDiv.style.animation = 'none';
+            }
             
             // 실리태번과 동일: 저장된 UUID와 send_date를 DOM에 복원 (구 메시지 호환)
             if (messageUuid) {
@@ -1812,6 +2212,10 @@ class ChatManager {
             }
             if (sendDate) {
                 wrapper.dataset.sendDate = sendDate.toString();
+            }
+            // 추론 내용도 dataset에 저장 (saveChat에서 읽기 위해)
+            if (message.extra?.reasoning) {
+                wrapper.dataset.reasoning = message.extra.reasoning;
             }
             // 실리태번과 동일: 원본 배열 인덱스 저장 (forceId)
             if (messageIndex >= 0) {
@@ -1832,21 +2236,35 @@ class ChatManager {
             skipped: skippedCount
         });
         
-        // DOM에 역순으로 추가 (오래된 메시지가 위에)
+        // DOM에 한 번에 추가 (DocumentFragment 사용)
+        // 역순으로 추가 (오래된 메시지가 위에)
+        const fragment = document.createDocumentFragment();
         messageFragments.reverse().forEach(wrapper => {
-            if (firstMessage) {
-                chatContainer.insertBefore(wrapper, firstMessage);
-            } else {
-                chatContainer.insertBefore(wrapper, chatContainer.firstChild);
-            }
+            fragment.appendChild(wrapper);
         });
         
-        // DOM 업데이트 완료 대기
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        // 한 번에 DOM에 추가 (스크롤이 움직이지 않도록)
+        if (firstMessage) {
+            chatContainer.insertBefore(fragment, firstMessage);
+        } else {
+            chatContainer.insertBefore(fragment, chatContainer.firstChild);
+        }
+        
+        // DOM 업데이트 완료 대기 (백그라운드 탭에서도 작동)
+        // waitForDOMUpdate - 전역 스코프에서 사용
+        if (typeof waitForDOMUpdate === 'function') {
+            await waitForDOMUpdate();
+        } else {
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        }
         
         // HTML 렌더링 제한 적용: 새로 추가된 메시지 포함하여 모든 메시지에 제한 적용
-        // DOM 업데이트 완료 대기
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        // DOM 업데이트 완료 대기 (백그라운드 탭에서도 작동)
+        if (typeof waitForDOMUpdate === 'function') {
+            await waitForDOMUpdate();
+        } else {
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        }
         
         if (htmlRenderLimit > 0) {
             // 모든 메시지 확인 (새로 추가된 메시지 포함)
@@ -1884,14 +2302,36 @@ class ChatManager {
             });
         }
         
-        // 새로 추가된 메시지들의 총 높이 계산
-        let totalAddedHeight = loadMoreBtnHeight;
-        messageFragments.forEach(wrapper => {
-            totalAddedHeight += wrapper.offsetHeight || wrapper.scrollHeight || 0;
-        });
-        
-        // 스크롤 위치 조정
-        chatContainer.scrollTop = currentScrollTop + totalAddedHeight;
+        // 스크롤 위치 고정: 현재 스크롤 위치를 유지
+        // 메시지 추가 후 참조 요소의 위치 변화를 계산하여 스크롤 보정
+        if (referenceElement && messageFragments.length > 0) {
+            // DOM 업데이트가 완전히 반영되도록 대기
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            
+            // 참조 요소의 새로운 위치 계산 (메시지 추가 후)
+            const newRect = referenceElement.getBoundingClientRect();
+            const newReferenceElementTop = newRect.top + chatContainer.scrollTop;
+            
+            // 참조 요소가 이동한 거리 계산 (메시지가 위에 추가되어 참조 요소가 아래로 이동)
+            const referenceElementOffset = newReferenceElementTop - referenceElementTop;
+            
+            // 스크롤 위치 조정: 참조 요소가 원래 화면상 위치에 있도록 보정
+            // 현재 스크롤 위치 + 참조 요소의 이동 거리 = 새로운 스크롤 위치
+            chatContainer.scrollTop = currentScrollTop + referenceElementOffset;
+            
+            // 레이아웃이 완전히 안정화될 때까지 추가 대기 후 최종 보정
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            
+            // 최종 보정: 참조 요소가 정확히 원래 위치에 있는지 확인
+            const finalRect = referenceElement.getBoundingClientRect();
+            const finalReferenceElementTop = finalRect.top + chatContainer.scrollTop;
+            const finalOffset = finalReferenceElementTop - referenceElementTop;
+            
+            // 1픽셀 이상 차이가 있으면 최종 보정
+            if (Math.abs(finalOffset) > 1) {
+                chatContainer.scrollTop = currentScrollTop + finalOffset;
+            }
+        }
         
         // 더 로드할 메시지가 있으면 "더보기" 버튼 다시 추가
         // 실리태번 호환: 첫 번째 메시지(인덱스 0)까지 포함해야 함
@@ -1906,10 +2346,131 @@ class ChatManager {
                 remainingLoadMoreBtn.remove();
             }
         }
+        
         } finally {
             // 더보기 로딩 완료
             this._isLoadingMoreMessages = false;
         }
+    }
+
+    /**
+     * API 응답에서 추론 내용 추출 (실리태번 방식 참고)
+     * @param {object} data - API 응답 데이터
+     * @param {string} apiProvider - API 제공자
+     * @param {object} options - 추가 옵션 (chatCompletionSource 등)
+     * @returns {string} 추출된 추론 내용
+     */
+    extractReasoningFromData(data, apiProvider, options = {}) {
+        if (!data) return '';
+        
+        const chatCompletionSource = options.chatCompletionSource || options.chat_completion_source;
+        const showThoughts = options.show_thoughts || options.showThoughts;
+        
+        switch (apiProvider) {
+            case 'claude':
+            case 'anthropic':
+                // Claude의 thinking 필드
+                if (data.content) {
+                    const thinkingPart = Array.isArray(data.content) 
+                        ? data.content.find(part => part.type === 'thinking')
+                        : null;
+                    const reasoning = thinkingPart?.thinking || '';
+                    return reasoning;
+                }
+                // delta 형식 (스트리밍)
+                if (data.delta?.thinking) {
+                    return data.delta.thinking;
+                }
+                // thinking 타입 content_block_delta
+                if (data.type === 'content_block_delta' && data.delta?.thinking) {
+                    return data.delta.thinking;
+                }
+                break;
+                
+            case 'openai':
+                if (!showThoughts) break;
+                
+                switch (chatCompletionSource) {
+                    case 'deepseek':
+                    case 'xai':
+                        return data?.choices?.[0]?.message?.reasoning_content 
+                            || data?.choices?.[0]?.delta?.reasoning_content 
+                            || '';
+                    case 'openrouter':
+                        return data?.choices?.[0]?.message?.reasoning 
+                            || data?.choices?.[0]?.delta?.reasoning 
+                            || '';
+                    case 'mistralai':
+                        if (data?.choices?.[0]?.message?.content?.[0]?.thinking) {
+                            return data.choices[0].message.content[0].thinking
+                                .map(part => part.text)
+                                .filter(x => x)
+                                .join('\n\n');
+                        }
+                        if (data?.choices?.[0]?.delta?.content?.[0]?.thinking?.[0]?.text) {
+                            return data.choices[0].delta.content[0].thinking[0].text;
+                        }
+                        return '';
+                    default:
+                        return data?.choices?.[0]?.message?.reasoning_content 
+                            || data?.choices?.[0]?.message?.reasoning
+                            || data?.choices?.[0]?.delta?.reasoning_content
+                            || data?.choices?.[0]?.delta?.reasoning
+                            || '';
+                }
+                break;
+                
+            case 'makersuite':
+            case 'gemini':
+            case 'vertexai':
+                // Vertex AI / Gemini의 thought 필드
+                // 실리태번 방식: part.thought가 true이면 그 part의 text가 추론 내용
+                // rawData 구조 확인 (callVertexAI에서 반환한 객체)
+                
+                let allParts = null;
+                if (data?.candidates?.[0]?.content?.parts) {
+                    allParts = data.candidates[0].content.parts;
+                } else if (data?.responseContent?.parts) {
+                    allParts = data.responseContent.parts;
+                } else if (data?.candidates?.[0]?.parts) {
+                    allParts = data.candidates[0].parts;
+                }
+                
+                if (allParts && Array.isArray(allParts)) {
+                    // thought가 true인 part만 추출
+                    const thoughtParts = allParts
+                        .filter(part => {
+                            if (typeof part !== 'object' || part === null) return false;
+                            // thought가 명시적으로 true인 경우만 추론으로 인정
+                            return 'thought' in part && part.thought === true && 'text' in part && part.text;
+                        })
+                        .map(part => String(part.text));
+                    
+                    return thoughtParts.join('\n\n');
+                }
+                break;
+                
+            case 'openrouter':
+                return data?.choices?.[0]?.message?.reasoning 
+                    || data?.choices?.[0]?.reasoning 
+                    || data?.choices?.[0]?.delta?.reasoning
+                    || '';
+                    
+            case 'mistralai':
+            case 'mistral':
+                if (data?.choices?.[0]?.message?.content?.[0]?.thinking) {
+                    return data.choices[0].message.content[0].thinking
+                        .map(part => part.text)
+                        .filter(x => x)
+                        .join('\n\n');
+                }
+                if (data?.choices?.[0]?.delta?.content?.[0]?.thinking?.[0]?.text) {
+                    return data.choices[0].delta.content[0].thinking[0].text;
+                }
+                return '';
+        }
+        
+        return '';
     }
 
     /**
@@ -1957,7 +2518,80 @@ class ChatManager {
             stream: false,
         });
 
-        return response;
+        // 비스트리밍 응답에서 추론 내용 추출
+        // response가 문자열이면 그대로 반환, 객체면 추론 내용도 함께 반환
+        if (typeof response === 'string') {
+            // API 함수가 문자열만 반환하는 경우 (기존 방식 유지)
+            return response;
+        } else {
+            // API 함수가 객체를 반환하는 경우 (추론 내용 포함)
+            let text = response.text || response.content || '';
+            
+            // 추론 추출: response.reasoning이 있으면 우선 사용, 없으면 rawData에서 추출
+            let reasoning = null;
+            
+            // response.reasoning이 있고 실제 추론 내용인지 확인 (빈 문자열이 아니고 'true' 같은 값이 아닌지)
+            if (response.reasoning && typeof response.reasoning === 'string' && response.reasoning.trim() && response.reasoning.trim() !== 'true') {
+                reasoning = response.reasoning;
+            }
+            
+            // rawData가 있고 reasoning이 없거나 유효하지 않으면 rawData에서 추출 시도
+            if ((!reasoning || !reasoning.trim() || reasoning.trim() === 'true') && response.rawData) {
+                reasoning = this.extractReasoningFromData(response.rawData, apiProvider, {
+                    chatCompletionSource: options.chatCompletionSource || options.chat_completion_source,
+                    show_thoughts: options.show_thoughts || options.showThoughts
+                });
+                
+                // 추출된 reasoning이 유효한지 확인 ('true' 같은 잘못된 값 제외)
+                if (reasoning && (reasoning.trim() === 'true' || reasoning.trim().length < 10)) {
+                    reasoning = null;
+                }
+            } else if (!reasoning) {
+                // rawData도 없으면 response 자체에서 추출 시도
+                reasoning = this.extractReasoningFromData(response, apiProvider, {
+                    chatCompletionSource: options.chatCompletionSource || options.chat_completion_source,
+                    show_thoughts: options.show_thoughts || options.showThoughts
+                });
+            }
+            
+            // 추론 내용이 텍스트에 포함되어 있으면 제거
+            if (reasoning && reasoning.trim()) {
+                const reasoningTrimmed = reasoning.trim();
+                if (text.includes(reasoningTrimmed)) {
+                    // 모든 위치에서 추론 제거
+                    let cleanedText = text;
+                    
+                    // 시작 부분에서 제거 (반복)
+                    while (cleanedText.startsWith(reasoningTrimmed)) {
+                        cleanedText = cleanedText.substring(reasoningTrimmed.length).trim();
+                    }
+                    
+                    // 끝 부분에서 제거 (반복)
+                    while (cleanedText.endsWith(reasoningTrimmed)) {
+                        cleanedText = cleanedText.substring(0, cleanedText.length - reasoningTrimmed.length).trim();
+                    }
+                    
+                    // 중간 부분에서 제거 (모든 발생)
+                    cleanedText = cleanedText.split(reasoningTrimmed).join('').trim();
+                    
+                    text = cleanedText;
+                }
+            }
+            
+            // 텍스트가 비어있고 추론만 있는 경우 처리
+            // 실리태번과 동일: 추론만 있는 경우 메시지를 표시하지 않거나, 추론을 메시지로 표시하지 않음
+            if ((!text || !text.trim()) && reasoning && reasoning.trim()) {
+                // 추론만 있는 경우 빈 텍스트로 처리 (추론은 별도로 표시됨)
+                // 실리태번과 동일: 추론만 있는 메시지는 표시하지 않음
+                text = '';
+            }
+            
+            return {
+                text: text,
+                reasoning: reasoning,
+                rawData: response // 원본 데이터도 함께 반환 (필요시 사용)
+            };
+        }
     }
 
     /**
@@ -1965,6 +2599,16 @@ class ChatManager {
      * @param {string} generateType - 생성 타입 ('normal' 또는 'continue')
      */
     async callAIWithStreaming(apiProvider, options, characterName, characterAvatar, generateType = 'normal') {
+        // 캐릭터 정보 검증 (디버깅)
+        console.log('[ChatManager.callAIWithStreaming] 캐릭터 정보:', {
+            characterName,
+            currentCharacterId: this.currentCharacterId,
+            generateType
+        });
+        
+        // 추론 추출 로그 리셋
+        this._reasoningExtractionLogged = false;
+        
         // API 함수 가져오기
         const apiFunctions = {
             'openai': callOpenAI,
@@ -2035,6 +2679,7 @@ class ChatManager {
         }
 
         let accumulatedFullText = fullText; // 기존 텍스트 + postfix + 새 텍스트
+        let accumulatedReasoning = ''; // 추론 내용 누적
         
         // 정규식 함수를 미리 import
         // getRegexedString, REGEX_PLACEMENT - 전역 스코프에서 사용
@@ -2055,19 +2700,108 @@ class ChatManager {
             throw new DOMException('The operation was aborted.', 'AbortError');
         }
         
+        // 추론 내용 업데이트 함수
+        const updateReasoningContent = async (reasoningText) => {
+            if (!reasoningText || !reasoningText.trim()) return;
+            
+            const reasoningButton = messageWrapper._reasoningButton;
+            const reasoningContent = messageWrapper._reasoningContent;
+            
+            if (!reasoningButton || !reasoningContent) return;
+            
+            // 추론 내용에 정규식 적용
+            let processedReasoning = reasoningText;
+            if (this.currentCharacterId) {
+                const chatMessages = this.elements.chatMessages.querySelectorAll('.message-wrapper');
+                const usableMessages = Array.from(chatMessages).filter(wrapper => {
+                    const role = wrapper.dataset.role;
+                    return role === 'user' || role === 'assistant';
+                });
+                const depth = usableMessages.length > 0 ? 0 : undefined;
+                
+                processedReasoning = await getRegexedString(reasoningText, REGEX_PLACEMENT.REASONING, {
+                    characterOverride: characterName || undefined,
+                    isMarkdown: true,
+                    isPrompt: false,
+                    depth: depth
+                });
+            }
+            
+            // 매크로 치환 적용
+            let userName = '';
+            try {
+                const settings = await SettingsStorage.load();
+                const currentPersonaId = settings.currentPersonaId;
+                if (currentPersonaId) {
+                    const persona = await UserPersonaStorage.load(currentPersonaId);
+                    if (persona?.name) {
+                        userName = persona.name;
+                    }
+                }
+            } catch (error) {
+                // 무시
+            }
+            processedReasoning = substituteParams(processedReasoning, userName, characterName || '');
+            
+            // 추론 내용 업데이트 (기존 내용이 있으면 교체, 없으면 추가)
+            let reasoningTextElement = reasoningContent.querySelector('.message-reasoning-text');
+            if (!reasoningTextElement) {
+                reasoningTextElement = document.createElement('div');
+                reasoningTextElement.className = 'message-reasoning-text';
+                reasoningContent.appendChild(reasoningTextElement);
+            }
+            
+            // 추론 텍스트는 일반 텍스트로 표시 (HTML 렌더링 없음)
+            reasoningTextElement.textContent = processedReasoning;
+            
+            // 추론 버튼 표시
+            reasoningButton.style.display = 'inline-block';
+        };
         
         await apiFunction({
             ...apiOptions,
             stream: true,
             signal: apiOptions.signal, // AbortSignal 전달
-            onChunk: async (chunk) => {
+            onChunk: async (chunk, chunkData = null) => {
+                // 추론 내용 추출 (chunkData가 있으면 사용, 없으면 chunk에서 추출)
+                let reasoningChunk = '';
+                if (chunkData) {
+                    // 디버깅: chunkData 구조 확인
+                    if (accumulatedReasoning.length === 0 && Object.keys(chunkData).length > 0) {
+                        console.log('[ChatManager] chunkData 구조 확인:', {
+                            apiProvider,
+                            chunkDataKeys: Object.keys(chunkData),
+                            chunkDataType: chunkData.type || 'unknown',
+                            hasDelta: !!chunkData.delta,
+                            hasChoices: !!chunkData.choices,
+                            chunkDataPreview: JSON.stringify(chunkData).substring(0, 200)
+                        });
+                    }
+                    
+                    reasoningChunk = this.extractReasoningFromData(chunkData, apiProvider, {
+                        chatCompletionSource: options.chatCompletionSource || options.chat_completion_source,
+                        show_thoughts: options.show_thoughts || options.showThoughts
+                    });
+                    if (reasoningChunk && reasoningChunk.trim()) {
+                        accumulatedReasoning += reasoningChunk;
+                        await updateReasoningContent(accumulatedReasoning);
+                    }
+                } else if (chunk) {
+                    // chunkData가 없고 chunk만 있는 경우, chunk에 추론이 포함되어 있을 수 있음
+                    // 특정 패턴으로 추론을 찾아보기 (예: "Right, time to get to work" 같은 패턴)
+                    // 하지만 이건 추론이 텍스트에 포함된 경우이므로, 실제로는 API 응답 구조를 확인해야 함
+                }
+                
                 // 중단 신호 확인 (매 청크마다 체크)
                 if (apiOptions.signal?.aborted) {
                     throw new DOMException('The operation was aborted.', 'AbortError');
                 }
-                // 계속하기 모드: 기존 텍스트 + postfix + 새 청크
+                
+                // 추론 내용은 청크 단위로 오므로 청크 단위로 제거하기 어려움
+                // 스트리밍 완료 후 전체 텍스트에서 누적된 추론 내용을 제거하는 방식 사용
+                // 여기서는 청크를 그대로 누적 (추론은 별도로 수집)
                 accumulatedFullText += chunk;
-                // fullText는 새로 생성된 텍스트만 (기존 텍스트 제외)
+                // fullText는 새로 생성된 텍스트만 (기존 텍스트 제외, 추론도 제외)
                 fullText = accumulatedFullText.substring(existingMessageText.length + continuePostfix.length);
                 // 실시간으로 텍스트 업데이트
                 if (messageTextElement) {
@@ -2080,7 +2814,33 @@ class ChatManager {
                     const depth = usableMessages.length > 0 ? 0 : undefined; // 스트리밍 중인 메시지는 가장 최근이므로 depth 0
                     
                     // 계속하기 모드: 전체 텍스트 (기존 + postfix + 새 텍스트) 처리
-                    const textToProcess = generateType === 'continue' ? accumulatedFullText : fullText;
+                    // 스트리밍 중에도 추론 내용이 텍스트에 포함되어 있으면 제거하여 표시
+                    let textToProcess = generateType === 'continue' ? accumulatedFullText : fullText;
+                    
+                    // 스트리밍 중에도 누적된 추론 내용이 텍스트에 포함되어 있으면 제거
+                    if (accumulatedReasoning && accumulatedReasoning.trim()) {
+                        const reasoningTrimmed = accumulatedReasoning.trim();
+                        if (textToProcess.includes(reasoningTrimmed)) {
+                            // 모든 위치에서 추론 제거
+                            let cleanedText = textToProcess;
+                            
+                            // 시작 부분에서 제거
+                            while (cleanedText.startsWith(reasoningTrimmed)) {
+                                cleanedText = cleanedText.substring(reasoningTrimmed.length).trim();
+                            }
+                            
+                            // 끝 부분에서 제거
+                            while (cleanedText.endsWith(reasoningTrimmed)) {
+                                cleanedText = cleanedText.substring(0, cleanedText.length - reasoningTrimmed.length).trim();
+                            }
+                            
+                            // 중간 부분에서 제거 (모든 발생)
+                            cleanedText = cleanedText.split(reasoningTrimmed).join('').trim();
+                            
+                            textToProcess = cleanedText;
+                        }
+                    }
+                    
                     const processed = await getRegexedString(textToProcess, REGEX_PLACEMENT.AI_OUTPUT, {
                         characterOverride: characterName || undefined, // 실리태번과 동일: 캐릭터 이름 전달
                         isMarkdown: true,
@@ -2111,9 +2871,48 @@ class ChatManager {
             },
         });
 
-        // 최종 원본 텍스트 저장
+        // 최종 원본 텍스트 저장 (추론 내용 제외)
         // 계속하기 모드: 전체 텍스트 (기존 + postfix + 새 텍스트) 저장
-        const finalText = generateType === 'continue' ? accumulatedFullText : fullText;
+        let finalText = generateType === 'continue' ? accumulatedFullText : fullText;
+        
+        // 최종적으로 추론 내용이 텍스트에 남아있는지 확인하고 제거
+        // (일부 API는 추론을 별도 필드와 텍스트에 모두 포함시킬 수 있음)
+        if (accumulatedReasoning && accumulatedReasoning.trim()) {
+            // 추론 내용이 텍스트에 포함되어 있으면 제거
+            const reasoningTrimmed = accumulatedReasoning.trim();
+            
+            if (finalText.includes(reasoningTrimmed)) {
+                // 모든 위치에서 추론 제거
+                let cleanedText = finalText;
+                
+                // 시작 부분에서 제거 (반복)
+                while (cleanedText.startsWith(reasoningTrimmed)) {
+                    cleanedText = cleanedText.substring(reasoningTrimmed.length).trim();
+                }
+                
+                // 끝 부분에서 제거 (반복)
+                while (cleanedText.endsWith(reasoningTrimmed)) {
+                    cleanedText = cleanedText.substring(0, cleanedText.length - reasoningTrimmed.length).trim();
+                }
+                
+                // 중간 부분에서 제거 (모든 발생)
+                cleanedText = cleanedText.split(reasoningTrimmed).join('').trim();
+                
+                finalText = cleanedText;
+            }
+            
+            await updateReasoningContent(accumulatedReasoning);
+            
+            // messageObject에 추론 내용 저장
+            const messageIndex = Array.from(this.elements.chatMessages.querySelectorAll('.message-wrapper')).indexOf(messageWrapper);
+            if (messageIndex >= 0 && this.chat[messageIndex]) {
+                if (!this.chat[messageIndex].extra) {
+                    this.chat[messageIndex].extra = {};
+                }
+                this.chat[messageIndex].extra.reasoning = accumulatedReasoning;
+            }
+        }
+        
         messageWrapper.dataset.originalText = finalText;
 
         return finalText;
@@ -2128,7 +2927,7 @@ class ChatManager {
      * @param {Array<string>} swipes - 스와이프 가능한 대안 응답 배열 (assistant일 때 사용)
      * @param {number} swipeIndex - 현재 표시할 스와이프 인덱스 (기본값: 0)
      */
-    async addMessage(text, sender, characterName = null, characterAvatar = null, swipes = [], swipeIndex = 0, userAvatar = null, sendDate = null) {
+    async addMessage(text, sender, characterName = null, characterAvatar = null, swipes = [], swipeIndex = 0, userAvatar = null, sendDate = null, reasoning = null) {
         // 사용자 이름과 캐릭터 이름 가져오기 (매크로 치환용)
         let userName = '';
         let charName = characterName || '';
@@ -2456,11 +3255,43 @@ class ChatManager {
             messageName.textContent = charName || 'Character';
         }
         
-        // 아바타와 이름을 묶는 컨테이너 생성
+        // 추론 버튼 추가 (assistant 메시지에만, 추론 내용이 있을 때만 표시)
+        const reasoningButton = document.createElement('button');
+        reasoningButton.className = 'message-reasoning-button';
+        reasoningButton.setAttribute('aria-label', '추론 내용 보기');
+        reasoningButton.innerHTML = '<i class="fa-solid fa-comment-dots"></i>';
+        reasoningButton.style.display = 'none'; // 기본적으로 숨김, 추론 내용이 있으면 표시 (CSS에서 관리)
+        
+        // 추론 내용 div 생성 (message-content 위에)
+        const reasoningContent = document.createElement('div');
+        reasoningContent.className = 'message-reasoning-content';
+        reasoningContent.style.display = 'none'; // 기본적으로 숨김 (CSS에서 관리, JavaScript에서 토글)
+        
+        // 버튼 클릭 시 추론 내용 토글
+        let isReasoningVisible = false;
+        reasoningButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            isReasoningVisible = !isReasoningVisible;
+            reasoningContent.style.display = isReasoningVisible ? 'block' : 'none';
+            // 버튼 활성 상태 토글 (CSS에서 관리)
+            if (isReasoningVisible) {
+                reasoningButton.classList.add('active');
+            } else {
+                reasoningButton.classList.remove('active');
+            }
+        });
+        
+        // 이름과 추론 버튼을 묶는 컨테이너 생성
+        const nameReasoningContainer = document.createElement('div');
+        nameReasoningContainer.className = 'message-name-reasoning-container';
+        nameReasoningContainer.appendChild(messageName);
+        nameReasoningContainer.appendChild(reasoningButton);
+        
+        // 아바타와 이름+버튼을 묶는 컨테이너 생성
         const avatarNameContainer = document.createElement('div');
         avatarNameContainer.className = 'message-avatar-name';
         avatarNameContainer.appendChild(avatar);
-        avatarNameContainer.appendChild(messageName);
+        avatarNameContainer.appendChild(nameReasoningContainer);
         
         // 메시지 헤더 생성 (아바타+이름 + 시간)
         const messageHeader = document.createElement('div');
@@ -2469,9 +3300,15 @@ class ChatManager {
         messageHeader.appendChild(messageTime);
 
         messageDiv.appendChild(messageHeader);
+        // 추론 내용을 message-content 위에 추가
+        messageDiv.appendChild(reasoningContent);
         messageDiv.appendChild(content); // message-content는 message-header 밖에
         
         messageWrapper.appendChild(messageDiv);
+        
+        // 추론 버튼과 추론 내용 요소를 messageWrapper에 저장 (나중에 업데이트하기 위해)
+        messageWrapper._reasoningButton = reasoningButton;
+        messageWrapper._reasoningContent = reasoningContent;
         
         // 편집/삭제 버튼 생성 함수
         const createActionButtons = () => {
@@ -2595,8 +3432,9 @@ class ChatManager {
         // 실리태번과 동일: this.chat 배열에도 메시지 추가 (동기화)
         // addMessage에서 메시지를 추가할 때마다 chat 배열에 추가하여 단일 소스로 유지
         // 단, 로딩 중이거나 저장 중일 때는 건너뛰기 (중복 방지)
+        let messageObject = null; // 추론 저장을 위해 스코프 밖에서 선언
         if (!this._isLoadingChat && !this._isLoadingMoreMessages && !this._isSavingChat) {
-            const messageObject = {
+            messageObject = {
                 uuid: messageUuid,
                 send_date: messageSendDate,
                 name: sender === 'user' ? (userName || 'User') : (charName || 'Character'),
@@ -2622,6 +3460,10 @@ class ChatManager {
                 }
             }
             this.chat.splice(insertIndex, 0, messageObject);
+        } else {
+            // 로딩 중이거나 저장 중일 때도 추론을 저장하기 위해 messageObject 찾기
+            // this.chat 배열에서 UUID로 찾기
+            messageObject = this.chat.find(msg => msg.uuid === messageUuid);
         }
         
         // HTML 렌더링 제한 적용: 로딩 중이 아닐 때만 개별 체크 (로딩 중이면 나중에 일괄 적용)
@@ -2675,22 +3517,83 @@ class ChatManager {
             this.renderHtmlIframesInElement(messageText, false);
         }
         
-        // 메시지 추가 후 전송 버튼 상태 업데이트
-        requestAnimationFrame(() => {
-            this.updateSendButtonState();
-        });
-
-        // 스크롤을 맨 아래로
-        this.scrollToBottom();
+        // 스크롤을 맨 아래로 (더보기 로딩 중이 아닐 때만)
+        // 더보기 로딩 중에는 스크롤 위치를 유지해야 함
+        if (!this._isLoadingMoreMessages) {
+            this.scrollToBottom();
+        }
         
-        // DOM 업데이트 완료 대기 후 저장 (메시지 카운팅 정확성 확보)
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        // 추론 내용 처리 (assistant 메시지에만)
+        if (sender === 'assistant' && reasoning && reasoning.trim()) {
+            // 추론 내용에 정규식 적용 (REASONING placement)
+            let processedReasoning = reasoning;
+            if (this.currentCharacterId) {
+                const chatMessages = this.elements.chatMessages.querySelectorAll('.message-wrapper');
+                const usableMessages = Array.from(chatMessages).filter(wrapper => {
+                    const role = wrapper.dataset.role;
+                    return role === 'user' || role === 'assistant';
+                });
+                const depth = usableMessages.length > 0 ? 0 : undefined;
+                
+                processedReasoning = await getRegexedString(reasoning, REGEX_PLACEMENT.REASONING, {
+                    characterOverride: charName || undefined,
+                    isMarkdown: true,
+                    isPrompt: false,
+                    depth: depth
+                });
+            }
+            
+            // 매크로 치환 적용
+            processedReasoning = substituteParams(processedReasoning, userName, charName);
+            
+            // 추론 내용 렌더링 (일반 텍스트, HTML 렌더링 없음)
+            const reasoningText = document.createElement('div');
+            reasoningText.className = 'message-reasoning-text';
+            reasoningText.textContent = processedReasoning;
+            
+            // 추론 내용 div에 추가
+            reasoningContent.appendChild(reasoningText);
+            
+            // 추론 버튼 표시
+            reasoningButton.style.display = 'inline-block';
+            
+            // messageObject에 추론 내용 저장
+            if (messageObject) {
+                if (!messageObject.extra) {
+                    messageObject.extra = {};
+                }
+                messageObject.extra.reasoning = reasoning;
+            }
+            
+            // DOM에도 추론 저장 (saveChat에서 읽기 위해)
+            // 원본 추론 텍스트를 dataset에 저장 (처리 전 원본)
+            if (reasoning && reasoning.trim()) {
+                messageWrapper.dataset.reasoning = reasoning;
+            }
+        }
         
         // 메시지 추가 후 자동 저장 (디바운스)
         // 더보기 로딩 중이거나 채팅 로딩 중이면 저장하지 않음 (중복 방지)
         if (!this._isLoadingMoreMessages && !this._isLoadingChat) {
-        this.saveChatDebounced();
+            console.log('[addMessage] 저장 시작 (saveChatDebounced 호출)');
+            // 백그라운드 탭에서도 작동하도록 비동기로 실행 (await 없이)
+            // saveChatDebounced 내부에서 백그라운드 감지하여 즉시 저장함
+            this.saveChatDebounced().catch((error) => {
+                console.error('[addMessage] saveChatDebounced 중 오류:', error);
+            });
+        } else {
+            console.log('[addMessage] 저장 건너뜀:', {
+                _isLoadingMoreMessages: this._isLoadingMoreMessages,
+                _isLoadingChat: this._isLoadingChat
+            });
         }
+        
+        // 메시지 추가 후 전송 버튼 상태 업데이트 (나중에 실행, 백그라운드에서도 작동)
+        Promise.resolve().then(() => {
+            this.updateSendButtonState();
+        }).catch((error) => {
+            console.debug('[addMessage] updateSendButtonState 중 오류 (무시):', error);
+        });
         
         return messageWrapper;
     }
@@ -2831,16 +3734,52 @@ class ChatManager {
      * 채팅 저장 (디바운스)
      */
     async saveChatDebounced() {
+        console.log('[saveChatDebounced] 호출됨:', {
+            _isSavingChat: this._isSavingChat,
+            _isLoadingMoreMessages: this._isLoadingMoreMessages,
+            _isLoadingChat: this._isLoadingChat
+        });
+        
         // 현재 저장 중이면 무시 (중복 저장 방지)
         if (this._isSavingChat) {
+            console.log('[saveChatDebounced] 이미 저장 중이므로 건너뜀');
             return;
         }
         
         // 더보기 로딩 중이면 저장하지 않음 (중복 방지)
         if (this._isLoadingMoreMessages) {
+            console.log('[saveChatDebounced] 더보기 로딩 중이므로 건너뜀');
             return;
         }
         
+        // 백그라운드 탭 감지
+        let isBackground = false;
+        try {
+            isBackground = document.hidden || !document.hasFocus();
+        } catch (e) {
+            // document.hasFocus가 지원되지 않는 경우
+        }
+        
+        // 백그라운드 탭에서는 즉시 저장 (setTimeout이 throttling되므로)
+        if (isBackground) {
+            if (this.saveChatDebounceTimer) {
+                clearTimeout(this.saveChatDebounceTimer);
+                this.saveChatDebounceTimer = null;
+            }
+            
+            // 백그라운드에서도 실행되도록 비동기로 실행 (await 없이)
+            // saveChat은 async 함수이므로 Promise로 실행되며, 백그라운드에서도 실행됨
+            // 백그라운드 실행 확인을 위한 로그 (백그라운드에서도 실행되면 콘솔에 표시됨)
+            console.log('[saveChatDebounced] 백그라운드 저장 시작', { timestamp: Date.now(), isBackground: true });
+            this.saveChat().then(() => {
+                console.log('[saveChatDebounced] 백그라운드 저장 완료', { timestamp: Date.now() });
+            }).catch((error) => {
+                console.debug('[saveChatDebounced] 백그라운드 저장 중 오류:', error);
+            });
+            return;
+        }
+        
+        // 포커스된 탭에서는 디바운스 사용
         if (this.saveChatDebounceTimer) {
             clearTimeout(this.saveChatDebounceTimer);
         }
@@ -2865,12 +3804,36 @@ class ChatManager {
     /**
      * 채팅 저장
      * 실리태번의 saveChat 함수와 동일한 구조
+     * 
+     * ⚠️ 중요: 이 함수는 다음 기능들과 강하게 연동되어 있습니다.
+     * 
+     * [연동 기능]
+     * 1. DOM 메시지와 저장소 메시지 병합: DOM에 표시되지 않은 메시지도 보존
+     *    * 불러온 채팅: DOM 5개 + 저장소 79개 = 총 79개 보존
+     * 2. currentChatId 없을 때 새 채팅 생성 방지: DOM 메시지 1개 이하면 저장 건너뜀
+     *    * 홈화면 나갔다가 다시 들어올 때 loadOrCreateChat이 호출되기 전에 saveChat이 호출되는 것을 방지
+     * 3. character.chat 업데이트: 저장된 채팅 이름을 character.chat에 저장 (loadOrCreateChat 연동)
+     * 
+     * [수정 시 주의사항]
+     * - 메시지 병합 로직 변경 시 → DOM 메시지와 저장소 메시지 모두 보존 확인
+     * - 새 채팅 생성 조건 변경 시 → loadOrCreateChat과 일치해야 함
+     * - character.chat 업데이트 위치 변경 시 → loadOrCreateChat에서 찾을 수 있도록 확인
+     * 
      * @param {string} [chatName] - 저장할 채팅 이름 (선택)
      * @param {object} [withMetadata] - 추가 메타데이터 (선택)
      */
     async saveChat(chatName = null, withMetadata = {}) {
+        console.log('[ChatManager.saveChat] 저장 시작:', {
+            currentChatId: this.currentChatId,
+            currentCharacterId: this.currentCharacterId,
+            _isSavingChat: this._isSavingChat,
+            _isLoadingMoreMessages: this._isLoadingMoreMessages,
+            _isLoadingChat: this._isLoadingChat
+        });
+        
         // 중복 저장 방지
         if (this._isSavingChat) {
+            console.log('[ChatManager.saveChat] 이미 저장 중이므로 건너뜀');
             // 경고 코드 토스트 알림 표시
             if (typeof showErrorCodeToast === 'function') {
                 showErrorCodeToast('WARN_CHAT_20011', '이미 저장 중이므로 무시');
@@ -2880,344 +3843,1090 @@ class ChatManager {
         
         // 더보기 로딩 중이면 저장하지 않음 (중복 방지)
         if (this._isLoadingMoreMessages) {
+            console.log('[ChatManager.saveChat] 더보기 로딩 중이므로 건너뜀');
             return;
         }
         
         // 채팅 로딩 중이면 저장하지 않음 (중복 방지)
         if (this._isLoadingChat) {
+            console.log('[ChatManager.saveChat] 채팅 로딩 중이므로 건너뜀');
             return;
         }
         
-        // 불러오기한 채팅은 저장하지 않음 (이미 저장소에 모든 메시지가 있음)
-        // currentChatId가 있으면 저장소에서 확인
-        if (this.currentChatId) {
-            try {
+        // 불러오기한 채팅도 저장 후에는 일반 채팅처럼 취급되므로, 저장 로직에서 특별 처리 불필요
+        // 단, 그리팅만 있는 새 채팅 방지를 위해 최소한의 체크만 수행
+        
+        // messages 변수를 try 블록 밖에서 선언 (finally 블록에서 참조 가능하도록)
+        let messages = [];
+        let messageCount = 0;
+        let existingChatData = null; // 메타데이터 생성에 사용
+        let domMessages = null; // DOM에서 수집한 메시지 (fallback용)
+        
+        try {
+            if (this.currentChatId) {
+                try {
                 // ChatStorage - 전역 스코프에서 사용
                 const existingChatData = await ChatStorage.load(this.currentChatId);
                 if (existingChatData && existingChatData.messages && existingChatData.messages.length > 0) {
                     // DOM 메시지 수 확인
                     const domMessageCount = this.elements.chatMessages.querySelectorAll('.message-wrapper').length;
                     const storedMessageCount = existingChatData.messages.length;
+                    const chatArrayLength = (this.chat && this.chat.length > 0) ? this.chat.length : 0;
                     
-                    // 불러오기한 채팅 체크:
-                    // 1. metadata.isImported 플래그가 있으면 불러오기한 채팅
-                    // 2. 저장소 메시지가 DOM 메시지보다 많고, 저장소 메시지가 10개 이상이면 불러오기한 채팅으로 간주
-                    // 단, 새 채팅 생성 직후에는 DOM 메시지가 적을 수 있으므로 주의 필요
-                    const isImportedFlag = existingChatData.metadata?.isImported || false;
-                    // 새 채팅 생성 직후에는 DOM 메시지가 1개(그리팅)만 있을 수 있으므로,
-                    // storedMessageCount가 매우 많고(10개 이상) DOM 메시지가 1개뿐일 때만 불러오기한 채팅으로 간주
-                    // 또한 새 채팅 생성 직후에는 currentChatId가 변경되었을 수 있으므로 주의
-                    const isImportedByCount = storedMessageCount > domMessageCount && storedMessageCount >= 10 && domMessageCount <= 1;
-                    const isImported = isImportedFlag || isImportedByCount;
+                    // 중요: this.chat의 메시지 수가 저장소보다 많으면 새 메시지가 추가된 것으로 판단
+                    // (리롤 후 새 메시지 생성 완료 시 저장해야 함)
+                    // 또는 DOM 메시지가 저장소 메시지보다 많으면 새 메시지가 추가된 것으로 판단
+                    // (리롤 후 새 메시지가 DOM에 추가되었지만 아직 this.chat에 반영되지 않았을 수 있음)
+                    const hasNewMessages = chatArrayLength > storedMessageCount || domMessageCount > storedMessageCount;
+                    
+                    // 불러온 채팅 로딩 중 방지: 저장소 메시지가 DOM 메시지보다 훨씬 많고, DOM 메시지가 1개 이하일 때만 저장 건너뜀
+                    // 이는 불러온 채팅이 로드 중일 때 저장이 발생하는 것을 방지하기 위함
+                    // 조건: 저장소 메시지가 10개 이상이고, DOM 메시지가 1개 이하이고, 새 메시지가 없을 때만 저장 건너뜀
+                    // (저장소에 메시지가 많은데 DOM에는 적으면 로딩 중일 가능성이 높음)
+                    // 단, 저장소 메시지가 적은 경우(새 채팅 등)는 저장해야 함
+                    const isLoadingLargeChat = storedMessageCount >= 10 && domMessageCount <= 1 && !hasNewMessages;
                     
                     console.log('[ChatManager.saveChat] 저장 전 체크:', {
                         chatId: this.currentChatId,
                         storedMessageCount,
                         domMessageCount,
-                        isImportedFlag,
-                        isImportedByCount,
-                        isImported,
-                        willSkip: isImported,
-                        currentChatId: this.currentChatId,
-                        existingChatId: existingChatData ? 'exists' : 'null'
+                        chatArrayLength,
+                        hasNewMessages,
+                        isLoadingLargeChat,
+                        willSave: isLoadingLargeChat ? '건너뜀 (대용량 채팅 로딩 중 방지)' : '저장 (일반 채팅 또는 불러온 채팅 모두 저장)'
                     });
                     
-                    // 불러오기한 채팅은 이미 저장소에 모든 메시지가 있으므로 저장 불필요
-                    // 저장하면 DOM 메시지와 병합하면서 중복이나 순서가 뒤섞일 수 있음
-                    // 단, 새 채팅 생성 직후에는 저장해야 함 (그리팅 메시지 저장 필요)
-                    
-                    // 새 채팅인지 확인: currentChatId가 없거나, chatId가 currentChatId와 다름
-                    // 또는 chatCreateDate가 최근인 경우 (5분 이내)
-                    const isNewlyCreatedChat = !this.currentChatId || 
-                                              chatId !== this.currentChatId ||
-                                              (this.chatCreateDate && (Date.now() - this.chatCreateDate) < 5 * 60 * 1000);
-                    
-                    // 새 채팅은 항상 저장해야 함 (그리팅 메시지 등)
-                    if (isNewlyCreatedChat) {
-                        console.log('[ChatManager.saveChat] 새 채팅 생성 직후로 판단, 저장 진행', {
-                            currentChatId: this.currentChatId,
-                            chatId,
-                            chatCreateDate: this.chatCreateDate,
-                            timeDiff: this.chatCreateDate ? Date.now() - this.chatCreateDate : null
-                        });
-                        // 새 채팅이므로 저장 계속 진행 (return 하지 않음)
-                    } else if (isImportedFlag) {
-                        // 기존 불러온 채팅은 건너뛰기
-                        console.log('[ChatManager.saveChat] 불러오기한 채팅으로 감지 (isImportedFlag), 저장 건너뜀');
-                        return;
-                    } else if (isImportedByCount && storedMessageCount >= 10 && domMessageCount <= 1) {
-                        // 불러오기한 채팅으로 판단 (저장소 메시지가 많고 DOM 메시지가 적음)
-                        console.log('[ChatManager.saveChat] 불러오기한 채팅으로 감지 (isImportedByCount), 저장 건너뜀');
+                    // 대용량 채팅 로딩 중인 경우에만 저장 건너뜀
+                    if (isLoadingLargeChat) {
+                        console.log('[ChatManager.saveChat] 대용량 채팅 로딩 중으로 감지, 저장 건너뜀');
                         return;
                     }
+                    // 그 외에는 모두 저장 (새 채팅, 불러온 채팅, 리롤 후 등 모두 저장)
                 }
-            } catch (error) {
-                // 오류가 발생해도 계속 진행 (정상 채팅 저장은 계속해야 함)
-                console.debug('[ChatManager.saveChat] 불러오기 채팅 확인 중 오류 (무시):', error);
-            }
-        }
-        
-        if (!this.currentCharacterId) {
-            return;
-        }
-        
-        // 저장 시작 플래그 설정
-        this._isSavingChat = true;
-        
-        // messages 변수를 try 블록 밖에서 선언 (finally 블록에서 참조 가능하도록)
-        let messages = [];
-        let messageCount = 0;
-        let existingChatData = null; // 메타데이터 생성에 사용
-        
-        try {
-        // CharacterStorage, ChatStorage - 전역 스코프에서 사용
-        // humanizedDateTime - 전역 스코프에서 사용
-        const character = await CharacterStorage.load(this.currentCharacterId);
-        
-        if (!character) {
-            // 경고 코드 토스트 알림 표시
-            if (typeof showErrorCodeToast === 'function') {
-                showErrorCodeToast('WARN_CHAT_20012', '캐릭터를 찾을 수 없어 저장 건너뜀');
-            }
-            return;
-        }
-
-        const characterName = character?.data?.name || character?.name || 'Character';
-        const finalChatName = chatName || this.currentChatName || `${characterName} - ${humanizedDateTime()}`;
-        
-        // 중요: chatId는 기존 채팅 ID를 우선 사용 (덮어쓰기 방지)
-        // currentChatId가 있으면 기존 채팅 업데이트, 없으면 새 채팅 생성
-        let chatId;
-        let isNewChat = false;
-        
-        if (this.currentChatId) {
-            // 기존 채팅이 있으면 그것을 사용 (덮어쓰기 방지)
-            chatId = this.currentChatId;
-            // 기존 채팅 데이터 로드 (메타데이터 보존용)
-            existingChatData = await ChatStorage.load(chatId);
-        } else {
-            // 새 채팅 생성 (고유 ID 보장)
-            // 같은 이름의 채팅이 이미 존재하는지 확인하여 중복 방지
-            // 새 채팅은 항상 타임스탬프를 포함하여 고유 ID 생성 (불러온 채팅과 구분)
-            const timestamp = Date.now();
-            let candidateChatId = `${this.currentCharacterId}_${finalChatName}_${timestamp}`;
-            
-            // 여전히 중복되는지 확인 (드물지만 가능)
-            let retryCount = 0;
-            while (await ChatStorage.load(candidateChatId) && retryCount < 5) {
-                candidateChatId = `${this.currentCharacterId}_${finalChatName}_${Date.now()}`;
-                retryCount++;
+                } catch (error) {
+                    // 오류가 발생해도 계속 진행 (정상 채팅 저장은 계속해야 함)
+                    console.debug('[ChatManager.saveChat] 저장 전 체크 중 오류 (무시):', error);
+                }
             }
             
-            chatId = candidateChatId;
-            isNewChat = true;
-            
-            console.log('[ChatManager.saveChat] 새 채팅 ID 생성:', {
-                chatId,
-                chatName: finalChatName,
-                timestamp
-            });
-        }
-
-        // 실리태번과 동일: chat 배열을 그대로 저장
-        // 실리태번의 saveChat(): const trimmedChat = (mesId !== undefined && mesId >= 0 && mesId < chat.length)
-        //     ? chat.slice(0, Number(mesId) + 1)
-        //     : chat.slice();
-        //     const chatToSave = [{ 헤더 }, ...trimmedChat];
-        
-        // messages 배열 초기화
-        messages = [];
-        
-        // 실리태번과 동일: this.chat 배열을 그대로 사용 (전체 메시지 보장)
-        // DOM에서 수집하는 대신 chat 배열 사용 (messagesToLoad로 인해 DOM에 일부만 있어도 문제 없음)
-        // 단, 새 채팅 생성 직후(chatCreateDate가 최근)이고 this.chat이 이전 채팅의 메시지를 포함하고 있을 수 있으므로 주의
-        const isNewChatRecent = this.chatCreateDate && (Date.now() - this.chatCreateDate) < 5 * 60 * 1000;
-        const isNewChatCondition = !this.currentChatId || isNewChatRecent;
-        
-        // 새 채팅이고 this.chat이 이전 채팅의 메시지를 포함하고 있는지 확인
-        // DOM 메시지 수와 chat 배열의 메시지 수가 다르면 이전 채팅의 메시지일 수 있음
-        const domMessageCount = this.elements.chatMessages.querySelectorAll('.message-wrapper').length;
-        const shouldUseChatArray = this.chat && this.chat.length > 0 && 
-                                   (!isNewChatCondition || (this.chat.length === domMessageCount && domMessageCount > 0));
-        
-        if (shouldUseChatArray) {
-            // chat 배열을 그대로 사용
-            messages = [...this.chat]; // 배열 복사
-            console.log('[ChatManager.saveChat] chat 배열 사용:', {
-                chatLength: this.chat.length,
-                firstMessage: this.chat[0] ? { send_date: this.chat[0].send_date, uuid: this.chat[0].uuid?.substring(0, 8), mes: this.chat[0].mes?.substring(0, 50) } : null,
-                lastMessage: this.chat[this.chat.length - 1] ? { send_date: this.chat[this.chat.length - 1].send_date, uuid: this.chat[this.chat.length - 1].uuid?.substring(0, 8), mes: this.chat[this.chat.length - 1].mes?.substring(0, 50) } : null
-            });
-        } else {
-            // chat 배열이 없으면 DOM에서 수집 (기존 로직 유지, 호환성)
-            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-            
-        const messageWrappers = Array.from(this.elements.chatMessages.querySelectorAll('.message-wrapper'));
-        const domMessages = [];
-        
-        messageWrappers.forEach(wrapper => {
-            const messageDiv = wrapper.querySelector('.message');
-            if (!messageDiv) return;
-
-            const isUser = messageDiv.classList.contains('user');
-            const messageText = wrapper.querySelector('.message-text');
-            if (!messageText) return;
-
-            const originalText = wrapper.dataset.originalText || messageText.textContent.trim();
-            
-            // 실리태번과 동일: 메시지 고유 ID 및 send_date 가져오기
-                const messageUuid = wrapper.dataset.messageUuid || null;
-                const sendDate = wrapper.dataset.sendDate ? parseInt(wrapper.dataset.sendDate) : null;
-            
-            // 메시지 시간 업데이트 (날짜+시간 형식으로 표시)
-            const messageTime = wrapper.querySelector('.message-time');
-            if (messageTime) {
-                const formatDateTime = (timestamp) => {
-                    const date = new Date(timestamp);
-                    const year = date.getFullYear();
-                    const month = String(date.getMonth() + 1).padStart(2, '0');
-                    const day = String(date.getDate()).padStart(2, '0');
-                    const hour = String(date.getHours()).padStart(2, '0');
-                    const minute = String(date.getMinutes()).padStart(2, '0');
-                    return `${year}년 ${month}월 ${day}일 ${hour}:${minute}`;
-                };
-                messageTime.textContent = formatDateTime(sendDate);
+            if (!this.currentCharacterId) {
+                console.log('[ChatManager.saveChat] currentCharacterId가 없어서 저장 건너뜀');
+                this._isSavingChat = false; // 저장 플래그 해제
+                return;
             }
             
-            // 스와이프 데이터 가져오기
-            let swipes = [];
-            if (wrapper.dataset.swipes) {
+            console.log('[ChatManager.saveChat] 저장 진행 중...');
+            
+            // 저장 시작 플래그 설정 (이미 위에서 설정했지만 다시 설정)
+            this._isSavingChat = true;
+            
+            // CharacterStorage, ChatStorage - 전역 스코프에서 사용
+            // humanizedDateTime - 전역 스코프에서 사용
+            const character = await CharacterStorage.load(this.currentCharacterId);
+            
+            if (!character) {
+                // 경고 코드 토스트 알림 표시
+                if (typeof showErrorCodeToast === 'function') {
+                    showErrorCodeToast('WARN_CHAT_20012', '캐릭터를 찾을 수 없어 저장 건너뜀');
+                }
+                this._isSavingChat = false; // 저장 플래그 해제
+                return;
+            }
+
+            const characterName = character?.data?.name || character?.name || 'Character';
+            const finalChatName = chatName || this.currentChatName || `${characterName} - ${humanizedDateTime()}`;
+            
+            // 중요: chatId는 기존 채팅 ID를 우선 사용 (덮어쓰기 방지)
+            // currentChatId가 있으면 기존 채팅 업데이트, 없으면 새 채팅 생성
+            let chatId;
+            let isNewChat = false;
+            
+            if (this.currentChatId) {
+                // 기존 채팅이 있으면 그것을 사용 (덮어쓰기 방지)
+                // currentChatId가 characterId와 같으면 잘못된 값이므로 null로 처리
+                if (this.currentChatId === this.currentCharacterId || !this.currentChatId.includes('_')) {
+                    console.warn('[ChatManager.saveChat] currentChatId가 characterId와 같거나 형식 오류, null로 처리:', {
+                        currentChatId: this.currentChatId,
+                        currentCharacterId: this.currentCharacterId
+                    });
+                    this.currentChatId = null;
+                    // null로 처리했으므로 아래 else 블록으로 이동
+                } else {
+                    chatId = this.currentChatId;
+                    // 기존 채팅 데이터 로드 (메타데이터 보존용)
+                    existingChatData = await ChatStorage.load(chatId);
+                }
+            }
+            
+            // currentChatId가 null이거나 characterId와 같으면 새로 찾기
+            if (!chatId) {
+                // currentChatId가 null이지만 기존 채팅이 있을 수 있음 (regenerateMessage 후 등)
+                // 1. 먼저 this.chat의 UUID로 매칭 시도 (리롤 후 새 메시지 생성 완료 시 필요)
+                if (this.chat && this.chat.length > 0 && this.currentCharacterId) {
+                    try {
+                        const allChats = await ChatStorage.loadAll();
+                        const chatMessageUuids = this.chat.map(msg => msg.uuid).filter(uuid => uuid);
+                        
+                        if (chatMessageUuids.length > 0) {
+                            // 모든 채팅에서 this.chat의 UUID를 포함하는 채팅 찾기
+                            // 매칭되는 UUID가 가장 많은 채팅을 선택 (가장 정확한 채팅)
+                            let bestMatch = null;
+                            let bestMatchCount = 0;
+                            
+                            for (const [candidateChatId, candidateChatData] of Object.entries(allChats)) {
+                                if (candidateChatData && candidateChatData.characterId === this.currentCharacterId) {
+                                    // chatId가 characterId와 같으면 잘못된 매칭 (characterId는 채팅 ID가 아님)
+                                    if (candidateChatId === this.currentCharacterId || !candidateChatId.includes('_')) {
+                                        continue;
+                                    }
+                                    
+                                    const candidateMessages = candidateChatData.messages || [];
+                                    const candidateUuids = candidateMessages.map(msg => msg.uuid).filter(uuid => uuid);
+                                    // this.chat의 UUID 중 매칭되는 개수 계산
+                                    const matchedUuids = chatMessageUuids.filter(uuid => candidateUuids.includes(uuid));
+                                    const matchCount = matchedUuids.length;
+                                    
+                                    // 매칭되는 UUID가 가장 많은 채팅 선택
+                                    if (matchCount > bestMatchCount) {
+                                        bestMatchCount = matchCount;
+                                        bestMatch = {
+                                            chatId: candidateChatId,
+                                            chatData: candidateChatData,
+                                            matchedCount: matchCount
+                                        };
+                                    }
+                                }
+                            }
+                            
+                            // 매칭되는 UUID가 this.chat의 절반 이상이면 해당 채팅으로 판단
+                            if (bestMatch && bestMatchCount >= Math.ceil(chatMessageUuids.length / 2)) {
+                                existingChatData = bestMatch.chatData;
+                                chatId = bestMatch.chatId;
+                                this.currentChatId = bestMatch.chatId; // 복원
+                                console.log('[ChatManager.saveChat] currentChatId 복원 (this.chat UUID 매칭 - 시작 부분):', {
+                                    chatId: chatId.substring(0, 50),
+                                    messageCount: existingChatData.messages?.length || 0,
+                                    chatUuidsCount: chatMessageUuids.length,
+                                    matchedUuids: bestMatchCount,
+                                    matchRatio: (bestMatchCount / chatMessageUuids.length * 100).toFixed(1) + '%'
+                                });
+                            }
+                        }
+                    } catch (error) {
+                        console.warn('[ChatManager.saveChat] 기존 채팅 찾기 실패 (this.chat 경로 - 시작 부분):', error);
+                    }
+                }
+                
+                // 2. this.chat 매칭 실패 시 DOM 메시지 UUID로 매칭 시도 (fallback)
+                if (!chatId) {
+                    const messageWrappersForCheck = Array.from(this.elements.chatMessages.querySelectorAll('.message-wrapper'));
+                    if (messageWrappersForCheck.length > 0 && this.currentCharacterId) {
+                        try {
+                            const allChats = await ChatStorage.loadAll();
+                            const domMessageUuidsForCheck = messageWrappersForCheck
+                                .map(w => w.dataset.messageUuid)
+                                .filter(uuid => uuid);
+                            
+                            if (domMessageUuidsForCheck.length > 0) {
+                                // 모든 채팅에서 DOM 메시지 UUID를 포함하는 채팅 찾기
+                                // 매칭되는 UUID가 가장 많은 채팅을 선택 (가장 정확한 채팅)
+                                let bestMatch = null;
+                                let bestMatchCount = 0;
+                                
+                                for (const [candidateChatId, candidateChatData] of Object.entries(allChats)) {
+                                    if (candidateChatData && candidateChatData.characterId === this.currentCharacterId) {
+                                        // chatId가 characterId와 같으면 잘못된 매칭 (characterId는 채팅 ID가 아님)
+                                        if (candidateChatId === this.currentCharacterId || !candidateChatId.includes('_')) {
+                                            continue;
+                                        }
+                                        
+                                        const candidateMessages = candidateChatData.messages || [];
+                                        const candidateUuids = candidateMessages.map(msg => msg.uuid).filter(uuid => uuid);
+                                        // DOM 메시지 UUID 중 매칭되는 개수 계산
+                                        const matchedUuids = domMessageUuidsForCheck.filter(uuid => candidateUuids.includes(uuid));
+                                        const matchCount = matchedUuids.length;
+                                        
+                                        // 매칭되는 UUID가 가장 많은 채팅 선택
+                                        if (matchCount > bestMatchCount) {
+                                            bestMatchCount = matchCount;
+                                            bestMatch = {
+                                                chatId: candidateChatId,
+                                                chatData: candidateChatData,
+                                                matchedCount: matchCount
+                                            };
+                                        }
+                                    }
+                                }
+                                
+                                // 매칭되는 UUID가 DOM 메시지의 절반 이상이면 해당 채팅으로 판단
+                                if (bestMatch && bestMatchCount >= Math.ceil(domMessageUuidsForCheck.length / 2)) {
+                                    existingChatData = bestMatch.chatData;
+                                    chatId = bestMatch.chatId;
+                                    this.currentChatId = bestMatch.chatId; // 복원
+                                    console.log('[ChatManager.saveChat] currentChatId 복원 (DOM UUID 매칭):', {
+                                        chatId: chatId.substring(0, 50),
+                                        messageCount: existingChatData.messages?.length || 0,
+                                        domUuidsCount: domMessageUuidsForCheck.length,
+                                        matchedUuids: bestMatchCount
+                                    });
+                                }
+                            }
+                        } catch (error) {
+                            console.warn('[ChatManager.saveChat] 기존 채팅 찾기 실패 (DOM 경로):', error);
+                        }
+                    }
+                }
+                
+                // 복원 실패 시에만 새 채팅 생성 로직 진행
+                if (!chatId) {
+                // DOM 메시지 수를 먼저 확인 (메시지 수집 전이므로 DOM에서 직접 확인)
+                const messageWrappers = Array.from(this.elements.chatMessages.querySelectorAll('.message-wrapper'));
+                const domMessageCount = messageWrappers.length;
+                
+                // 중요: currentChatId가 없고 DOM 메시지가 0개면 저장하지 않음
+                // 홈화면으로 나갔다가 다시 캐릭터를 선택할 때 loadOrCreateChat이 호출되기 전에
+                // saveChat이 호출되면 새 채팅이 생성되는 것을 방지
+                // 그리팅만 있어도 저장해야 함 (채팅 목록에 표시되어야 하므로)
+                if (domMessageCount === 0) {
+                    console.debug('[ChatManager.saveChat] currentChatId 없고 DOM 메시지 0개, 저장 건너뜀 (loadOrCreateChat에서 처리):', {
+                        domMessageCount,
+                        currentChatId: this.currentChatId
+                    });
+                    this._isSavingChat = false; // 저장 플래그 해제
+                    return;
+                }
+                
+                // 새 채팅 생성 (고유 ID 보장)
+                // 같은 이름의 채팅이 이미 존재하는지 확인하여 중복 방지
+                // 새 채팅은 항상 타임스탬프를 포함하여 고유 ID 생성 (불러온 채팅과 구분)
+                const timestamp = Date.now();
+                let candidateChatId = `${this.currentCharacterId}_${finalChatName}_${timestamp}`;
+                
+                // 여전히 중복되는지 확인 (드물지만 가능)
+                let retryCount = 0;
+                while (await ChatStorage.load(candidateChatId) && retryCount < 5) {
+                    candidateChatId = `${this.currentCharacterId}_${finalChatName}_${Date.now()}`;
+                    retryCount++;
+                }
+                
+                chatId = candidateChatId;
+                isNewChat = true;
+                
+                console.log('[ChatManager.saveChat] 새 채팅 ID 생성:', {
+                    chatId,
+                    chatName: finalChatName,
+                    timestamp
+                });
+                }
+            }
+
+            // 실리태번과 동일: chat 배열을 그대로 저장
+            // 실리태번의 saveChat(): const trimmedChat = (mesId !== undefined && mesId >= 0 && mesId < chat.length)
+            //     ? chat.slice(0, Number(mesId) + 1)
+            //     : chat.slice();
+            //     const chatToSave = [{ 헤더 }, ...trimmedChat];
+            //
+            // ⚠️ 중요: 실리태번은 chat 배열을 단일 소스로 사용합니다.
+            // DOM은 단순히 표시용이며, 저장 시에는 chat 배열을 그대로 사용합니다.
+            // 우리도 동일하게 this.chat 배열을 단일 소스로 사용합니다.
+            
+            // messages 배열 초기화
+            messages = [];
+            
+            // 실리태번과 동일: this.chat 배열을 그대로 사용 (DOM이 아닌 chat 배열을 소스로)
+            // 이렇게 하면 messagesToLoad 설정과 무관하게 모든 메시지가 저장됩니다.
+            // 실리태번: const trimmedChat = chat.slice(); messages = [...trimmedChat];
+            // 단, 기존 채팅이 있고 저장소에 메시지가 있으면 병합 로직을 거쳐야 함 (삭제된 메시지 제외)
+            // currentChatId가 null이면 UUID 매칭으로 기존 채팅 찾기 시도
+            if (this.chat && this.chat.length > 0) {
+                // currentChatId가 null이면 UUID 매칭으로 기존 채팅 찾기 시도 (리롤 후 새 메시지 생성 시 필요)
+                if (!this.currentChatId && this.currentCharacterId) {
+                    try {
+                        const allChats = await ChatStorage.loadAll();
+                        const chatMessageUuids = this.chat.map(msg => msg.uuid).filter(uuid => uuid);
+                        
+                        if (chatMessageUuids.length > 0) {
+                            // 모든 채팅에서 this.chat의 UUID를 포함하는 채팅 찾기
+                            // 매칭되는 UUID가 가장 많은 채팅을 선택 (가장 정확한 채팅)
+                            let bestMatch = null;
+                            let bestMatchCount = 0;
+                            
+                            for (const [candidateChatId, candidateChatData] of Object.entries(allChats)) {
+                                if (candidateChatData && candidateChatData.characterId === this.currentCharacterId) {
+                                    const candidateMessages = candidateChatData.messages || [];
+                                    const candidateUuids = candidateMessages.map(msg => msg.uuid).filter(uuid => uuid);
+                                    // this.chat의 UUID 중 매칭되는 개수 계산
+                                    const matchedUuids = chatMessageUuids.filter(uuid => candidateUuids.includes(uuid));
+                                    const matchCount = matchedUuids.length;
+                                    
+                                    // 매칭되는 UUID가 가장 많은 채팅 선택
+                                    if (matchCount > bestMatchCount) {
+                                        bestMatchCount = matchCount;
+                                        bestMatch = {
+                                            chatId: candidateChatId,
+                                            chatData: candidateChatData,
+                                            matchedCount: matchCount
+                                        };
+                                    }
+                                }
+                            }
+                            
+                            // 매칭되는 UUID가 this.chat의 절반 이상이면 해당 채팅으로 판단
+                            // chatId가 characterId와 같거나 형식이 잘못된 경우 제외
+                            if (bestMatch && bestMatchCount >= Math.ceil(chatMessageUuids.length / 2)) {
+                                const candidateChatId = bestMatch.chatId;
+                                // chatId가 characterId와 같으면 잘못된 매칭 (characterId는 채팅 ID가 아님)
+                                // chatId는 보통 "characterId_chatName_timestamp" 형식
+                                if (candidateChatId && candidateChatId !== this.currentCharacterId && candidateChatId.includes('_')) {
+                                    existingChatData = bestMatch.chatData;
+                                    chatId = candidateChatId;
+                                    this.currentChatId = candidateChatId; // 복원
+                                    console.log('[ChatManager.saveChat] currentChatId 복원 (this.chat UUID 매칭):', {
+                                        chatId: chatId.substring(0, 50),
+                                        messageCount: existingChatData.messages?.length || 0,
+                                        chatUuidsCount: chatMessageUuids.length,
+                                        matchedUuids: bestMatchCount,
+                                        matchRatio: (bestMatchCount / chatMessageUuids.length * 100).toFixed(1) + '%'
+                                    });
+                                } else {
+                                    console.warn('[ChatManager.saveChat] 잘못된 chatId 매칭 건너뜀:', {
+                                        candidateChatId: candidateChatId?.substring(0, 50),
+                                        currentCharacterId: this.currentCharacterId,
+                                        reason: candidateChatId === this.currentCharacterId ? 'characterId와 동일' : 'chatId 형식 오류'
+                                    });
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.warn('[ChatManager.saveChat] 기존 채팅 찾기 실패 (this.chat 경로):', error);
+                    }
+                }
+                
+                // 기존 채팅이 있고 저장소에 메시지가 있으면 병합 로직 필요 (삭제된 메시지 제외)
+                if (this.currentChatId && existingChatData && existingChatData.messages && existingChatData.messages.length > 0) {
+                    // 병합 로직을 거치기 위해 DOM 수집 경로로 이동
+                    // (실제로는 this.chat을 사용하지만, existingMessages와 병합하여 삭제된 메시지 제외)
+                    console.log('[ChatManager.saveChat] 기존 채팅이 있으므로 병합 로직 사용:', {
+                        chatArrayLength: this.chat.length,
+                        existingMessageCount: existingChatData.messages.length,
+                        currentChatId: this.currentChatId.substring(0, 30)
+                    });
+                    // DOM 수집 경로로 이동하여 병합 로직 사용
+                    // (실제로는 this.chat을 domMessages로 사용)
+                } else {
+                    // 새 채팅이거나 저장소에 메시지가 없으면 this.chat을 직접 사용
+                    messages = [...this.chat];
+                    console.log('[ChatManager.saveChat] ✅ this.chat 배열을 소스로 사용 (실리태번 방식):', {
+                        chatArrayLength: this.chat.length,
+                        messagesCount: messages.length,
+                        currentChatId: this.currentChatId?.substring(0, 30) || 'null'
+                    });
+                }
+            }
+            
+            // this.chat이 비어있거나 병합이 필요한 경우 DOM에서 수집
+            if (!messages || messages.length === 0) {
+                // this.chat이 비어있으면 DOM에서 수집 (fallback - 비정상적인 경우)
+                console.warn('[ChatManager.saveChat] ⚠️ this.chat이 비어있어 DOM에서 수집 (fallback)');
+                
+                // 백그라운드 탭 감지
+                let isBackground = false;
                 try {
-                    swipes = JSON.parse(wrapper.dataset.swipes);
+                    isBackground = document.hidden || !document.hasFocus();
                 } catch (e) {
-                    // 경고 코드 토스트 알림 표시
-                    if (typeof showErrorCodeToast === 'function') {
-                        showErrorCodeToast('WARN_CHAT_20013', '스와이프 데이터 파싱 실패', e);
+                    // document.hasFocus가 지원되지 않는 경우
+                }
+                
+                // DOM 업데이트 완료 대기 (메시지 삭제 후 즉시 저장할 때 DOM이 완전히 업데이트되도록)
+                // 백그라운드 탭에서는 waitForDOMUpdate 사용 (마이크로태스크 큐 기반으로 즉시 실행)
+                if (typeof waitForDOMUpdate === 'function') {
+                    // 백그라운드에서도 작동하도록 waitForDOMUpdate 사용
+                    await waitForDOMUpdate();
+                    // 한 번 더 호출하여 완전히 실행되도록 보장
+                    await waitForDOMUpdate();
+                } else {
+                    // 폴백: 포커스된 탭에서만 requestAnimationFrame 사용
+                    if (!isBackground) {
+                        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve)))));
+                    }
+                }
+                    
+                // DOM에서 메시지 수집 (재시도 로직 추가)
+                // loadChat 후 즉시 saveChat이 호출될 때 DOM 업데이트가 완료되지 않았을 수 있음
+                let messageWrappers = [];
+                let retryCount = 0;
+                const maxRetries = 5;
+                
+                while (retryCount < maxRetries) {
+                    // 모든 메시지 래퍼 수집 (숨겨진 메시지 제외)
+                    messageWrappers = Array.from(this.elements.chatMessages.querySelectorAll('.message-wrapper'))
+                        .filter(wrapper => !wrapper.classList.contains('message-hidden') && wrapper.style.display !== 'none');
+                    
+                    // 메시지가 있으면 반복 종료
+                    if (messageWrappers.length > 0) {
+                        break;
+                    }
+                    
+                    // 메시지가 없고 로딩 중이면 대기 후 재시도
+                    if (this._isLoadingChat || this._isLoadingMoreMessages) {
+                        // 백그라운드 탭에서도 작동하도록 waitForDOMUpdate 사용
+                        if (typeof waitForDOMUpdate === 'function') {
+                            await waitForDOMUpdate();
+                        } else {
+                            // 폴백: 포커스된 탭에서만 requestAnimationFrame 사용
+                            if (!isBackground) {
+                                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                            } else {
+                                // 백그라운드에서는 마이크로태스크 큐 사용
+                                await Promise.resolve();
+                            }
+                        }
+                        retryCount++;
+                    } else {
+                        // 로딩 중이 아니면 메시지가 실제로 없는 것
+                        break;
+                    }
+                }
+                
+                // this.chat이 있고 병합이 필요한 경우, this.chat을 domMessages로 사용
+                if (this.chat && this.chat.length > 0 && this.currentChatId && existingChatData && existingChatData.messages && existingChatData.messages.length > 0) {
+                    // this.chat을 domMessages로 변환 (DOM에서 최신 내용 확인)
+                    domMessages = this.chat.map(msg => {
+                        // DOM에서 최신 내용 확인 (편집된 경우)
+                        const wrapper = messageWrappers.find(w => w.dataset.messageUuid === msg.uuid);
+                        if (wrapper) {
+                            const messageDiv = wrapper.querySelector('.message');
+                            if (!messageDiv) return msg;
+
+                            const messageText = wrapper.querySelector('.message-text');
+                            if (!messageText) return msg;
+
+                            const originalText = wrapper.dataset.originalText || messageText.textContent.trim();
+                            
+                            // 실리태번과 동일: this.chat 배열의 메시지 내용을 우선 사용 (편집된 경우 정규식 적용된 텍스트)
+                            // DOM의 originalText는 편집 전 원본이므로, this.chat에 저장된 값이 최신임
+                            let finalMessageText = originalText;
+                            const chatMessage = this.chat.find(m => m.uuid === msg.uuid);
+                            if (chatMessage && chatMessage.mes) {
+                                finalMessageText = chatMessage.mes; // this.chat의 메시지가 최신 (편집된 경우 정규식 적용됨)
+                            }
+                            
+                            // DOM에서 추가 정보 수집
+                            const sendDate = wrapper.dataset.sendDate ? parseInt(wrapper.dataset.sendDate) : (msg.send_date || null);
+                            
+                            // 스와이프 데이터 가져오기
+                            let swipes = [];
+                            if (wrapper.dataset.swipes) {
+                                try {
+                                    swipes = JSON.parse(wrapper.dataset.swipes);
+                                } catch (e) {
+                                    // 무시
+                                }
+                            }
+                            
+                            // 추론 내용 가져오기
+                            let reasoning = null;
+                            if (msg.extra && msg.extra.reasoning) {
+                                reasoning = msg.extra.reasoning;
+                            } else if (wrapper.dataset.reasoning) {
+                                reasoning = wrapper.dataset.reasoning;
+                            }
+                            
+                            // DOM에서 최신 내용으로 업데이트
+                            return {
+                                ...msg,
+                                mes: finalMessageText,
+                                send_date: sendDate,
+                                extra: {
+                                    ...msg.extra,
+                                    swipes: swipes.length > 1 ? swipes.slice(1) : [],
+                                    ...(reasoning ? { reasoning } : {})
+                                }
+                            };
+                        }
+                        return msg;
+                    });
+                    console.log('[ChatManager.saveChat] this.chat을 domMessages로 사용 (병합 로직 준비):', {
+                        chatArrayLength: this.chat.length,
+                        domMessagesLength: domMessages.length
+                    });
+                } else {
+                    domMessages = [];
+                }
+                
+                messageWrappers.forEach(wrapper => {
+                    const messageDiv = wrapper.querySelector('.message');
+                    if (!messageDiv) return;
+
+                    const isUser = messageDiv.classList.contains('user');
+                    const messageText = wrapper.querySelector('.message-text');
+                    if (!messageText) return;
+
+                    const originalText = wrapper.dataset.originalText || messageText.textContent.trim();
+                    
+                    // 실리태번과 동일: 메시지 고유 ID 및 send_date 가져오기
+                    const messageUuid = wrapper.dataset.messageUuid || null;
+                    const sendDate = wrapper.dataset.sendDate ? parseInt(wrapper.dataset.sendDate) : null;
+                    
+                    // 메시지 시간 업데이트 (날짜+시간 형식으로 표시)
+                    const messageTime = wrapper.querySelector('.message-time');
+                    if (messageTime) {
+                        const formatDateTime = (timestamp) => {
+                            const date = new Date(timestamp);
+                            const year = date.getFullYear();
+                            const month = String(date.getMonth() + 1).padStart(2, '0');
+                            const day = String(date.getDate()).padStart(2, '0');
+                            const hour = String(date.getHours()).padStart(2, '0');
+                            const minute = String(date.getMinutes()).padStart(2, '0');
+                            return `${year}년 ${month}월 ${day}일 ${hour}:${minute}`;
+                        };
+                        messageTime.textContent = formatDateTime(sendDate);
+                    }
+                    
+                    // 스와이프 데이터 가져오기
+                    let swipes = [];
+                    if (wrapper.dataset.swipes) {
+                        try {
+                            swipes = JSON.parse(wrapper.dataset.swipes);
+                        } catch (e) {
+                            // 경고 코드 토스트 알림 표시
+                            if (typeof showErrorCodeToast === 'function') {
+                                showErrorCodeToast('WARN_CHAT_20013', '스와이프 데이터 파싱 실패', e);
+                            }
+                        }
+                    }
+                    
+                    // 실리태번과 동일: force_avatar 가져오기
+                    const forceAvatar = wrapper.dataset.forceAvatar || null;
+                    
+                    // 실리태번과 동일: 메시지의 name 필드 확인 (다른 캐릭터가 보낸 메시지 처리)
+                    let messageName = isUser ? 'User' : characterName;
+                    if (!isUser && wrapper.dataset.characterName) {
+                        const storedCharacterName = wrapper.dataset.characterName;
+                        if (storedCharacterName !== characterName) {
+                            messageName = storedCharacterName;
+                        }
+                    }
+
+                    // 추론 내용 가져오기 (여러 소스에서 확인)
+                    let reasoning = null;
+                    
+                    // 1. 먼저 this.chat 배열에서 찾기
+                    if (messageUuid && this.chat) {
+                        const chatMessage = this.chat.find(msg => msg.uuid === messageUuid);
+                        if (chatMessage && chatMessage.extra && chatMessage.extra.reasoning) {
+                            reasoning = chatMessage.extra.reasoning;
+                        }
+                    }
+                    
+                    // 2. this.chat에서 찾지 못했으면 DOM의 dataset에서 직접 읽기
+                    if (!reasoning) {
+                        const storedReasoning = wrapper.dataset.reasoning || null;
+                        if (storedReasoning) {
+                            reasoning = storedReasoning;
+                        }
+                    }
+                    
+                    // 실리태번과 동일: this.chat 배열의 메시지 내용을 우선 사용 (편집된 경우 정규식 적용된 텍스트)
+                    // DOM의 originalText는 편집 전 원본이므로, this.chat에 저장된 값이 최신임
+                    let finalMessageText = originalText;
+                    if (messageUuid && this.chat) {
+                        const chatMessage = this.chat.find(msg => msg.uuid === messageUuid);
+                        if (chatMessage && chatMessage.mes) {
+                            finalMessageText = chatMessage.mes; // this.chat의 메시지가 최신 (편집된 경우 정규식 적용됨)
+                            if (finalMessageText !== originalText) {
+                                console.log('[ChatManager.saveChat] this.chat 메시지 사용:', {
+                                    uuid: messageUuid.substring(0, 8),
+                                    originalText: originalText.substring(0, 50),
+                                    finalMessageText: finalMessageText.substring(0, 50)
+                                });
+                            }
+                        }
+                    }
+                    
+                    const message = {
+                        uuid: messageUuid,
+                        send_date: sendDate,
+                        name: messageName,
+                        is_user: isUser,
+                        is_system: false,
+                        mes: finalMessageText,
+                        extra: {
+                            swipes: swipes.length > 1 ? swipes.slice(1) : [],
+                        },
+                    };
+                    
+                    // 추론 내용 추가
+                    if (reasoning) {
+                        if (!message.extra) {
+                            message.extra = {};
+                        }
+                        message.extra.reasoning = reasoning;
+                    }
+                    
+                    // 실리태번과 동일: force_avatar 추가
+                    if (isUser && forceAvatar) {
+                        message.force_avatar = forceAvatar;
+                    }
+
+                    domMessages.push(message);
+                });
+                
+                // 실리태번과 동일: send_date 기준으로 정렬 (오름차순, 오래된 것부터 최근 순서)
+                domMessages.sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
+                
+                // 디버깅: DOM에서 수집한 메시지 UUID 확인
+                const collectedUuids = domMessages.map(msg => msg.uuid?.substring(0, 8) || 'no-uuid');
+                console.log('[ChatManager.saveChat] DOM에서 메시지 수집:', {
+                    domMessageCount: domMessages.length,
+                    collectedUuids: collectedUuids,
+                    // DOM에서 실제로 찾은 메시지 래퍼 수와 비교
+                    actualWrapperCount: messageWrappers.length
+                });
+                
+                // 중요: DOM 메시지와 IndexedDB의 기존 메시지를 병합
+                // 더보기로 추가된 메시지는 이미 IndexedDB에 저장되어 있으므로,
+                // DOM에 없는 메시지도 보존해야 함
+                
+                // existingChatData가 없으면 찾기 시도 (currentChatId가 없거나 새 채팅으로 인식된 경우)
+                // DOM 메시지 UUID와 this.chat UUID 모두 사용하여 기존 채팅 찾기
+                if (!existingChatData && this.currentCharacterId) {
+                    try {
+                        const allChats = await ChatStorage.loadAll();
+                        
+                        // DOM 메시지의 UUID 수집
+                        const domMessageUuids = domMessages.map(msg => msg.uuid).filter(uuid => uuid);
+                        
+                        // this.chat의 UUID도 수집 (리롤 후 새 메시지 생성 시 기존 메시지 UUID 사용)
+                        const chatMessageUuids = [];
+                        if (this.chat && this.chat.length > 0) {
+                            this.chat.forEach(msg => {
+                                if (msg.uuid) {
+                                    chatMessageUuids.push(msg.uuid);
+                                }
+                            });
+                        }
+                        
+                        // DOM UUID와 chat UUID를 합쳐서 사용
+                        const allMessageUuids = [...new Set([...domMessageUuids, ...chatMessageUuids])];
+                        
+                        if (allMessageUuids.length > 0) {
+                            // 모든 채팅에서 메시지 UUID를 포함하는 채팅 찾기
+                            // 매칭되는 UUID가 가장 많은 채팅을 선택 (가장 정확한 채팅)
+                            let bestMatch = null;
+                            let bestMatchCount = 0;
+                            
+                            for (const [candidateChatId, candidateChatData] of Object.entries(allChats)) {
+                                if (candidateChatData && candidateChatData.characterId === this.currentCharacterId) {
+                                    // chatId가 characterId와 같으면 잘못된 매칭 (characterId는 채팅 ID가 아님)
+                                    if (candidateChatId === this.currentCharacterId || !candidateChatId.includes('_')) {
+                                        continue;
+                                    }
+                                    
+                                    const candidateMessages = candidateChatData.messages || [];
+                                    const candidateUuids = candidateMessages.map(msg => msg.uuid).filter(uuid => uuid);
+                                    // 메시지 UUID 중 매칭되는 개수 계산
+                                    const matchedUuids = allMessageUuids.filter(uuid => candidateUuids.includes(uuid));
+                                    const matchCount = matchedUuids.length;
+                                    
+                                    // 매칭되는 UUID가 가장 많은 채팅 선택
+                                    if (matchCount > bestMatchCount) {
+                                        bestMatchCount = matchCount;
+                                        bestMatch = {
+                                            chatId: candidateChatId,
+                                            chatData: candidateChatData,
+                                            matchedCount: matchCount
+                                        };
+                                    }
+                                }
+                            }
+                            
+                            // 매칭되는 UUID가 전체 UUID의 절반 이상이면 해당 채팅으로 판단
+                            if (bestMatch && bestMatchCount >= Math.ceil(allMessageUuids.length / 2)) {
+                                existingChatData = bestMatch.chatData;
+                                chatId = bestMatch.chatId;
+                                this.currentChatId = bestMatch.chatId; // 복원
+                                isNewChat = false; // 새 채팅이 아님
+                                console.log('[ChatManager.saveChat] 기존 채팅 발견 (UUID 매칭):', {
+                                    chatId: chatId.substring(0, 50),
+                                    messageCount: existingChatData.messages?.length || 0,
+                                    domUuidsCount: domMessageUuids.length,
+                                    chatUuidsCount: chatMessageUuids.length,
+                                    matchedUuids: bestMatchCount,
+                                    matchRatio: (bestMatchCount / allMessageUuids.length * 100).toFixed(1) + '%'
+                                });
+                            }
+                        }
+                    } catch (error) {
+                        console.warn('[ChatManager.saveChat] 기존 채팅 찾기 실패:', error);
+                    }
+                }
+                
+                // existingChatData가 있으면 병합 (기존 채팅이거나 찾은 채팅)
+                // 중요: DOM에 표시되지 않은 메시지도 보존해야 함
+                // currentChatId가 null이지만 existingChatData가 있으면 chatId 복원
+                if (existingChatData && existingChatData.messages && existingChatData.messages.length > 0) {
+                    // currentChatId가 null이면 chatId 복원 (regenerateMessage 후 저장 시 필요)
+                    if (!this.currentChatId && chatId) {
+                        this.currentChatId = chatId;
+                        console.log('[ChatManager.saveChat] currentChatId 복원 (existingChatData 병합):', {
+                            chatId: chatId.substring(0, 30)
+                        });
+                    }
+                    const existingMessages = existingChatData.messages || [];
+                    const domMessageUuids = new Set(domMessages.map(msg => msg.uuid).filter(uuid => uuid));
+                    
+                    // DOM에 없는 메시지는 IndexedDB에서 가져와서 병합
+                    const missingMessages = existingMessages.filter(msg => {
+                        if (!msg.uuid) return false; // UUID가 없으면 제외 (레거시 메시지)
+                        return !domMessageUuids.has(msg.uuid);
+                    });
+                    
+                    console.log('[ChatManager.saveChat] 메시지 병합:', {
+                        chatId: chatId?.substring(0, 30),
+                        domMessageCount: domMessages.length,
+                        existingMessageCount: existingMessages.length,
+                        missingMessageCount: missingMessages.length,
+                        willMerge: missingMessages.length > 0 || existingMessages.length > domMessages.length,
+                        currentChatId: this.currentChatId?.substring(0, 30),
+                        isNewChat: isNewChat
+                    });
+                    
+                    // 중요: DOM 메시지 수가 기존 메시지 수보다 적으면 반드시 병합
+                    // 더보기로 일부만 표시된 경우에도 모든 메시지를 보존해야 함
+                    // 단, 삭제된 메시지는 제외해야 함
+                    // 
+                    // 삭제된 메시지 판단:
+                    // 1. DOM에 있는 메시지는 살아있음 (편집된 경우 최신 내용)
+                    // 2. DOM에 없지만 send_date가 DOM의 마지막 메시지보다 이전이면 더보기로 숨겨진 메시지
+                    // 3. DOM에 없고 send_date가 DOM의 마지막 메시지보다 이후면 삭제된 메시지 (regenerateMessage 등)
+                    const chatUuids = new Set();
+                    if (this.chat && this.chat.length > 0) {
+                        this.chat.forEach(msg => {
+                            if (msg.uuid) {
+                                chatUuids.add(msg.uuid);
+                            }
+                        });
+                    }
+                    
+                    if (missingMessages.length > 0 || existingMessages.length > domMessages.length) {
+                        // DOM 메시지는 최신 내용을 반영하므로 우선 사용
+                        const domMessageMap = new Map();
+                        domMessages.forEach(msg => {
+                            if (msg.uuid) {
+                                domMessageMap.set(msg.uuid, msg);
+                            }
+                        });
+                        
+                        // DOM의 마지막 메시지 send_date 찾기 (삭제 판단 기준)
+                        const lastDomMessageDate = domMessages.length > 0 
+                            ? Math.max(...domMessages.map(msg => msg.send_date || 0))
+                            : 0;
+                        
+                        // 기존 메시지를 순회하면서 필터링 및 병합
+                        // 중요: this.chat이 단일 소스이므로, this.chat에 없는 메시지는 삭제된 것으로 간주
+                        messages = existingMessages
+                            .filter(existingMsg => {
+                                // DOM에 있으면 포함 (편집된 경우 최신 내용)
+                                if (existingMsg.uuid && domMessageMap.has(existingMsg.uuid)) {
+                                    return true;
+                                }
+                                // DOM에 없지만 this.chat에 있으면 더보기로 숨겨진 메시지로 간주하여 포함
+                                if (existingMsg.uuid && chatUuids.has(existingMsg.uuid)) {
+                                    return true;
+                                }
+                                // DOM에 없고 this.chat에도 없으면 삭제된 메시지 (제외)
+                                // _deletedMessageUuids도 확인하지만, this.chat이 더 우선순위가 높음
+                                if (existingMsg.uuid && this._deletedMessageUuids && this._deletedMessageUuids.has(existingMsg.uuid)) {
+                                    // 삭제된 메시지로 간주하여 제외
+                                    return false;
+                                }
+                                // send_date가 DOM의 마지막 메시지보다 이전이면 더보기로 숨겨진 메시지일 수 있음
+                                // 하지만 this.chat에 없으면 삭제된 것으로 간주 (리롤 후 새 메시지 생성 시)
+                                if (existingMsg.send_date && existingMsg.send_date < lastDomMessageDate) {
+                                    // this.chat에 없으면 삭제된 메시지로 간주하여 제외
+                                    // (리롤로 인해 this.chat에서 제거되었을 수 있음)
+                                    return false;
+                                }
+                                // send_date가 없거나 DOM의 마지막 메시지보다 이후면 삭제된 메시지로 간주하여 제외
+                                return false;
+                            })
+                            .map(existingMsg => {
+                                // DOM에 있는 메시지는 DOM의 최신 내용 사용
+                                if (existingMsg.uuid && domMessageMap.has(existingMsg.uuid)) {
+                                    return domMessageMap.get(existingMsg.uuid);
+                                }
+                                // DOM에 없는 메시지는 기존 메시지 사용 (더보기로 숨겨진 메시지)
+                                return existingMsg;
+                            });
+                        
+                        // send_date 기준으로 정렬 (순서 보장)
+                        messages.sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
+                        
+                        console.log('[ChatManager.saveChat] ✅ 병합 완료:', {
+                            totalMessages: messages.length,
+                            domMessages: domMessages.length,
+                            existingMessages: existingMessages.length,
+                            chatArrayLength: this.chat?.length || 0,
+                            deletedMessages: existingMessages.length - messages.length,
+                            lastDomMessageDate,
+                            chatUuidsCount: chatUuids.size
+                        });
+                    } else {
+                        // 모든 메시지가 DOM에 있으면 DOM 메시지만 사용
+                        messages = domMessages;
+                        console.log('[ChatManager.saveChat] ⚠️ 병합 불필요 (모든 메시지가 DOM에 있음):', {
+                            totalMessages: messages.length,
+                            domMessages: domMessages.length
+                        });
+                    }
+                } else {
+                    // IndexedDB에 기존 메시지가 없으면 DOM 메시지만 사용
+                    // 단, existingChatData가 있으면 병합 로직을 거쳐야 함 (삭제된 메시지 제외)
+                    // currentChatId가 null이지만 existingChatData가 있으면 chatId 복원
+                    if (existingChatData && existingChatData.messages && existingChatData.messages.length > 0) {
+                        // currentChatId가 null이면 chatId 복원
+                        if (!this.currentChatId && chatId) {
+                            this.currentChatId = chatId;
+                            console.log('[ChatManager.saveChat] currentChatId 복원:', {
+                                chatId: chatId.substring(0, 30)
+                            });
+                        }
+                        // existingChatData가 있으면 병합 로직 사용 (삭제된 메시지 제외)
+                        const existingMessages = existingChatData.messages || [];
+                        const domMessageUuids = new Set(domMessages.map(msg => msg.uuid).filter(uuid => uuid));
+                        
+                        // DOM에 없는 메시지는 IndexedDB에서 가져와서 병합
+                        const missingMessages = existingMessages.filter(msg => {
+                            if (!msg.uuid) return false;
+                            return !domMessageUuids.has(msg.uuid);
+                        });
+                        
+                        const chatUuids = new Set();
+                        if (this.chat && this.chat.length > 0) {
+                            this.chat.forEach(msg => {
+                                if (msg.uuid) {
+                                    chatUuids.add(msg.uuid);
+                                }
+                            });
+                        }
+                        
+                        // DOM 메시지 수가 기존 메시지 수보다 적으면 반드시 병합
+                        if (missingMessages.length > 0 || existingMessages.length > domMessages.length) {
+                            const domMessageMap = new Map();
+                            domMessages.forEach(msg => {
+                                if (msg.uuid) {
+                                    domMessageMap.set(msg.uuid, msg);
+                                }
+                            });
+                            
+                            const lastDomMessageDate = domMessages.length > 0 
+                                ? Math.max(...domMessages.map(msg => msg.send_date || 0))
+                                : 0;
+                            
+                            messages = existingMessages
+                                .filter(existingMsg => {
+                                    // DOM에 있으면 포함 (편집된 경우 최신 내용)
+                                    if (existingMsg.uuid && domMessageMap.has(existingMsg.uuid)) {
+                                        return true;
+                                    }
+                                    // DOM에 없지만 this.chat에 있으면 더보기로 숨겨진 메시지로 간주하여 포함
+                                    if (existingMsg.uuid && chatUuids.has(existingMsg.uuid)) {
+                                        return true;
+                                    }
+                                    // DOM에 없고 this.chat에도 없으면 삭제된 메시지 (제외)
+                                    // _deletedMessageUuids도 확인하지만, this.chat이 더 우선순위가 높음
+                                    if (existingMsg.uuid && this._deletedMessageUuids && this._deletedMessageUuids.has(existingMsg.uuid)) {
+                                        return false;
+                                    }
+                                    // send_date가 DOM의 마지막 메시지보다 이전이면 더보기로 숨겨진 메시지일 수 있음
+                                    // 하지만 this.chat에 없으면 삭제된 것으로 간주 (리롤 후 새 메시지 생성 시)
+                                    if (existingMsg.send_date && existingMsg.send_date < lastDomMessageDate) {
+                                        // this.chat에 없으면 삭제된 메시지로 간주하여 제외
+                                        // (리롤로 인해 this.chat에서 제거되었을 수 있음)
+                                        return false;
+                                    }
+                                    // send_date가 없거나 DOM의 마지막 메시지보다 이후면 삭제된 메시지로 간주하여 제외
+                                    return false;
+                                })
+                                .map(existingMsg => {
+                                    // DOM에 있는 메시지는 DOM의 최신 내용 사용
+                                    if (existingMsg.uuid && domMessageMap.has(existingMsg.uuid)) {
+                                        return domMessageMap.get(existingMsg.uuid);
+                                    }
+                                    // DOM에 없는 메시지는 기존 메시지 사용 (더보기로 숨겨진 메시지)
+                                    return existingMsg;
+                                });
+                            
+                            messages.sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
+                            
+                            console.log('[ChatManager.saveChat] ✅ 병합 완료 (existingChatData 있음):', {
+                                totalMessages: messages.length,
+                                domMessages: domMessages.length,
+                                existingMessages: existingMessages.length,
+                                deletedMessages: existingMessages.length - messages.length
+                            });
+                        } else {
+                            // 모든 메시지가 DOM에 있으면 DOM 메시지만 사용
+                            messages = domMessages;
+                            console.log('[ChatManager.saveChat] ⚠️ 병합 불필요 (모든 메시지가 DOM에 있음):', {
+                                totalMessages: messages.length,
+                                domMessages: domMessages.length
+                            });
+                        }
+                    } else {
+                        // existingChatData가 없으면 DOM 메시지만 사용
+                        messages = domMessages;
+                        console.log('[ChatManager.saveChat] ⚠️ 기존 채팅 데이터 없음, DOM 메시지만 저장:', {
+                            domMessageCount: domMessages.length,
+                            currentChatId: this.currentChatId?.substring(0, 30),
+                            chatId: chatId?.substring(0, 30),
+                            hasExistingChatData: !!existingChatData
+                        });
                     }
                 }
             }
             
-            // 실리태번과 동일: force_avatar 가져오기
-            const forceAvatar = wrapper.dataset.forceAvatar || null;
-            
-            // 실리태번과 동일: 메시지의 name 필드 확인 (다른 캐릭터가 보낸 메시지 처리)
-            let messageName = isUser ? 'User' : characterName;
-            if (!isUser && wrapper.dataset.characterName) {
-                const storedCharacterName = wrapper.dataset.characterName;
-                if (storedCharacterName !== characterName) {
-                    messageName = storedCharacterName;
-                }
+            // 안전장치: DOM에서 메시지가 없는데 this.chat에는 메시지가 있으면 경고 (domMessages가 수집된 경우에만)
+            if (domMessages !== null && domMessages.length === 0 && this.chat && this.chat.length > 0) {
+                console.warn('[ChatManager.saveChat] DOM에는 메시지가 없지만 this.chat에는 메시지가 있음:', {
+                    domMessageCount: domMessages.length,
+                    chatArrayLength: this.chat.length,
+                    chatUuids: this.chat.map(msg => msg.uuid?.substring(0, 8) || 'no-uuid')
+                });
             }
-
-            const message = {
-                    uuid: messageUuid,
-                    send_date: sendDate,
-                    name: messageName,
-                is_user: isUser,
-                is_system: false,
-                mes: originalText,
-                extra: {
-                        swipes: swipes.length > 1 ? swipes.slice(1) : [],
+                
+            // UUID가 없는 메시지에 새 UUID 생성 (안전장치)
+            messages.forEach(msg => {
+                if (!msg.uuid) {
+                    msg.uuid = uuidv4();
+                    }
+                });
+                
+            // 메시지 카운트 업데이트
+            messageCount = messages.length;
+            
+            console.log('[ChatManager.saveChat] 메시지 수집 완료:', {
+                messageCount: messages.length,
+                firstMessage: messages[0] ? { send_date: messages[0].send_date, uuid: messages[0].uuid?.substring(0, 8), mes: messages[0].mes?.substring(0, 50) } : null,
+                lastMessage: messages[messages.length - 1] ? { send_date: messages[messages.length - 1].send_date, uuid: messages[messages.length - 1].uuid?.substring(0, 8), mes: messages[messages.length - 1].mes?.substring(0, 50) } : null
+            });
+            
+            // 메타데이터 생성 (기존 메타데이터 보존)
+            const existingMetadata = existingChatData?.metadata || {};
+            const metadata = {
+                user_name: existingMetadata.user_name || 'User',
+                character_name: characterName,
+                characterId: this.currentCharacterId, // 필수: 채팅 필터링에 사용 (이중 저장)
+                create_date: existingMetadata.create_date || this.chatCreateDate || Date.now(), // 기존 생성 날짜 보존
+                chat_metadata: {
+                    ...existingMetadata.chat_metadata,
+                    ...withMetadata, // 새로운 메타데이터가 있으면 추가/덮어쓰기
                 },
             };
-            
-            // 실리태번과 동일: force_avatar 추가
-            if (isUser && forceAvatar) {
-                message.force_avatar = forceAvatar;
-            }
 
-            domMessages.push(message);
-        });
-        
-        // 실리태번과 동일: send_date 기준으로 정렬 (오름차순, 오래된 것부터 최근 순서)
-        domMessages.sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
-            messages = domMessages;
-            console.log('[ChatManager.saveChat] DOM에서 메시지 수집 (chat 배열 없음):', {
-                domMessageCount: domMessages.length
-            });
-        }
-        
-        // 실리태번과 동일: send_date 기준으로 정렬 (순서 보장)
-        // 실리태번 호환: 첫 번째 메시지는 인덱스 0에 있어야 함
-        messages.sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
+            // 채팅 데이터 구성 (기존 데이터 보존)
+            // characterId를 최상위와 metadata 모두에 저장하여 안전성 확보
+            const chatData = {
+                characterId: this.currentCharacterId, // 필수: 채팅 필터링에 사용
+                chatName: finalChatName,
+                metadata, // metadata에도 characterId 포함
+                messages,
+                // lastMessageDate: 메시지가 있으면 마지막 메시지의 send_date 사용, 없으면 기존 값 유지
+                lastMessageDate: messages.length > 0 ? (() => {
+                    // send_date 기준으로 정렬하여 마지막 메시지 찾기
+                    const sortedMessages = [...messages].sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
+                    const lastMessage = sortedMessages[sortedMessages.length - 1];
+                    // send_date가 있으면 사용, 없으면 다른 필드 시도
+                    return lastMessage.send_date || 
+                           lastMessage.date || 
+                           lastMessage.timestamp || 
+                           Date.now(); // fallback으로 현재 시간
+                })() : (existingChatData?.lastMessageDate || null),
+            };
+
+            // 저장 (덮어쓰기 확인)
+            // 중요: ChatStorage.save와 CharacterStorage.save를 순차적으로 실행하여
+            // 한쪽이 완료되지 않아도 최소한 한쪽은 저장되도록 함
             
-        // UUID가 없는 메시지에 새 UUID 생성 (안전장치)
-        messages.forEach(msg => {
-            if (!msg.uuid) {
-                msg.uuid = uuidv4();
+            // 안전장치: DOM에서 메시지가 없으면 messages 배열도 비어있어야 함
+            // 하지만 DOM에서 메시지를 수집했으므로 이미 messages는 DOM과 일치함
+            // 이 체크는 추가 안전장치일 뿐
+            if (messages.length === 0) {
+                console.debug('[ChatManager.saveChat] 메시지가 0개인 채팅 저장:', {
+                    chatId,
+                    chatName: finalChatName
+                });
+            }
+            
+            await ChatStorage.save(chatId, chatData);
+            
+            // 저장 후 IndexedDB에 실제로 저장되었는지 확인 (디버깅)
+            // console.debug 대신 console.log 사용하여 필터링되지 않도록 함
+            const verifySaved = await ChatStorage.load(chatId);
+            if (verifySaved) {
+                const savedMessageCount = verifySaved.messages?.length || 0;
+                if (savedMessageCount !== messages.length) {
+                    console.warn('[ChatManager.saveChat] ⚠️ IndexedDB 저장 확인 불일치:', {
+                        expectedCount: messages.length,
+                        actualCount: savedMessageCount,
+                        chatId: chatId.substring(0, 50),
+                        savedUuids: verifySaved.messages?.map(m => m.uuid?.substring(0, 8) || 'no-uuid') || []
+                    });
+                } else {
+                    console.log('[ChatManager.saveChat] ✅ IndexedDB 저장 확인:', {
+                        messageCount: savedMessageCount,
+                        chatId: chatId.substring(0, 50),
+                        savedUuids: verifySaved.messages?.map(m => m.uuid?.substring(0, 8) || 'no-uuid') || []
+                    });
                 }
-            });
-            
-        // 메시지 카운트 업데이트
-        messageCount = messages.length;
-        
-        console.log('[ChatManager.saveChat] 메시지 수집 완료:', {
-            messageCount: messages.length,
-            firstMessage: messages[0] ? { send_date: messages[0].send_date, uuid: messages[0].uuid?.substring(0, 8), mes: messages[0].mes?.substring(0, 50) } : null,
-            lastMessage: messages[messages.length - 1] ? { send_date: messages[messages.length - 1].send_date, uuid: messages[messages.length - 1].uuid?.substring(0, 8), mes: messages[messages.length - 1].mes?.substring(0, 50) } : null
-        });
-        
-
-        // 메타데이터 생성 (기존 메타데이터 보존)
-        const existingMetadata = existingChatData?.metadata || {};
-        const metadata = {
-            user_name: existingMetadata.user_name || 'User',
-            character_name: characterName,
-            characterId: this.currentCharacterId, // 필수: 채팅 필터링에 사용 (이중 저장)
-            create_date: existingMetadata.create_date || this.chatCreateDate || Date.now(), // 기존 생성 날짜 보존
-            chat_metadata: {
-                ...existingMetadata.chat_metadata,
-                ...withMetadata, // 새로운 메타데이터가 있으면 추가/덮어쓰기
-            },
-        };
-
-        // 채팅 데이터 구성 (기존 데이터 보존)
-        // characterId를 최상위와 metadata 모두에 저장하여 안전성 확보
-        const chatData = {
-            characterId: this.currentCharacterId, // 필수: 채팅 필터링에 사용
-            chatName: finalChatName,
-            metadata, // metadata에도 characterId 포함
-            messages,
-            // lastMessageDate: 메시지가 있으면 마지막 메시지의 send_date 사용, 없으면 기존 값 유지
-            lastMessageDate: messages.length > 0 ? (() => {
-                // send_date 기준으로 정렬하여 마지막 메시지 찾기
-                const sortedMessages = [...messages].sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
-                const lastMessage = sortedMessages[sortedMessages.length - 1];
-                // send_date가 있으면 사용, 없으면 다른 필드 시도
-                return lastMessage.send_date || 
-                       lastMessage.date || 
-                       lastMessage.timestamp || 
-                       Date.now(); // fallback으로 현재 시간
-            })() : (existingChatData?.lastMessageDate || null),
-        };
-
-        // 저장 (덮어쓰기 확인)
-        // 중요: ChatStorage.save와 CharacterStorage.save를 순차적으로 실행하여
-        // 한쪽이 완료되지 않아도 최소한 한쪽은 저장되도록 함
-        await ChatStorage.save(chatId, chatData);
-        
-        // 캐릭터에 현재 채팅 정보 저장
-        // character.chat를 업데이트하지 않으면 loadOrCreateChat에서 채팅을 찾지 못할 수 있음
-        character.chat = finalChatName;
-        character.date_last_chat = Date.now();
-        try {
-            await CharacterStorage.save(this.currentCharacterId, character);
-        } catch (error) {
-            // CharacterStorage 저장 실패해도 ChatStorage는 이미 저장되었으므로 경고만 출력
-            // 경고 코드 토스트 알림 표시
-            if (typeof showErrorCodeToast === 'function') {
-                showErrorCodeToast('WARN_CHAT_20014', 'CharacterStorage 저장 실패 (ChatStorage는 저장됨)', error);
+            } else {
+                console.warn('[ChatManager.saveChat] ⚠️ IndexedDB에서 채팅을 찾을 수 없음:', {
+                    chatId: chatId.substring(0, 50)
+                });
             }
-        }
+            
+            // 중요: saveChat 후 this.chat 배열을 저장된 messages와 동기화
+            // DOM에서 메시지를 수집했으므로, this.chat도 DOM과 일치하도록 업데이트
+            // 이렇게 하면 삭제된 메시지가 this.chat에 남아있지 않음
+            this.chat = [...messages]; // 저장된 messages 배열로 this.chat 업데이트
+            
+            // 디버깅: 동기화 확인
+            if (this.chat.length !== messages.length) {
+                console.warn('[ChatManager.saveChat] this.chat 동기화 불일치:', {
+                    chatLength: this.chat.length,
+                    messagesLength: messages.length
+                });
+            }
+            
+            // 캐릭터에 현재 채팅 정보 저장
+            // character.chat를 업데이트하지 않으면 loadOrCreateChat에서 채팅을 찾지 못할 수 있음
+            character.chat = finalChatName;
+            character.date_last_chat = Date.now();
+            try {
+                await CharacterStorage.save(this.currentCharacterId, character);
+            } catch (error) {
+                // CharacterStorage 저장 실패해도 ChatStorage는 이미 저장되었으므로 경고만 출력
+                // 경고 코드 토스트 알림 표시
+                if (typeof showErrorCodeToast === 'function') {
+                    showErrorCodeToast('WARN_CHAT_20014', 'CharacterStorage 저장 실패 (ChatStorage는 저장됨)', error);
+                }
+            }
 
-        // 현재 채팅 ID와 이름 업데이트
-        this.currentChatId = chatId;
-        this.currentChatName = finalChatName;
-
-        // messageCount 저장 (finally 블록에서 사용하기 위해)
-        messageCount = messages.length;
-        
-        
+            // 현재 채팅 ID와 이름 업데이트
+            this.currentChatId = chatId;
+            this.currentChatName = finalChatName;
+            
+            // 현재 채팅 ID 저장 (복원용)
+            try {
+                await ChatStorage.saveCurrent(chatId);
+            } catch (error) {
+                console.warn('[ChatManager.saveChat] currentChatId 저장 실패:', error);
+            }
+            
+            // messageCount 저장 (finally 블록에서 사용하기 위해)
+            messageCount = messages.length;
+            
         } catch (error) {
             // 오류 코드 토스트 알림 표시
             if (typeof showErrorCodeToast === 'function') {
@@ -3235,13 +4944,36 @@ class ChatManager {
                     window.panelManager.refreshChatListPanel(this.currentCharacterId).catch(error => {
                         console.debug('[ChatManager.saveChat] 채팅 목록 패널 새로고침 오류:', error);
                     });
-            });
+                });
             }
         }
     }
 
     /**
      * 채팅 로드
+     * 
+     * ⚠️ 중요: 이 함수는 다음 기능들과 강하게 연동되어 있습니다.
+     * 
+     * [연동 기능]
+     * 1. messagesToLoad 설정: 최근 N개만 표시 (startIndex 계산)
+     *    * if (chat.length > count) { startIndex = chat.length - count; }
+     * 2. 더보기 버튼: startIndex > 0이면 더보기 버튼 추가 (addLoadMoreButton)
+     * 3. htmlRenderLimit: 역순 인덱스 기준으로 최근 N개만 HTML 렌더링
+     *    * ⚠️ 중요: HTML 렌더링 제한이 정규식보다 우선 적용됨
+     *    * 정규식은 먼저 적용되지만, 렌더링 제한에 의해 최근 N개가 아닌 메시지는 플레이스홀더로 표시됨
+     * 4. character.chat 업데이트: 불러온 채팅이 가장 최근이 되도록 (loadOrCreateChat 연동)
+     *    * try 블록 끝에서 실행 보장 (채팅 로드 완료 후)
+     * 5. 정규식: 모든 메시지 렌더링 시 getRegexedString 호출 (isMarkdown: true)
+     *    * 정규식 적용 후 HTML 렌더링 제한 적용
+     * 
+     * [수정 시 주의사항]
+     * - startIndex 계산 변경 시 → loadMoreMessagesFromStart의 endIndex 계산도 함께 수정
+     * - 더보기 버튼 표시 조건 변경 시 → addLoadMoreButton 호출 위치 확인
+     * - htmlRenderLimit 적용 위치 변경 시 → loadMoreMessagesFromStart에도 동일하게 적용
+     *   * ⚠️ 중요: 정규식 적용 후 HTML 렌더링 제한 적용 순서 유지
+     * - character.chat 업데이트 위치 변경 시 → try 블록 끝에서 실행 보장 (채팅 로드 완료 후)
+     * - 정규식과 HTML 렌더링 제한: 모든 메시지 렌더링 시 정규식 적용 후 HTML 렌더링 제한 적용
+     * 
      * @param {string} chatId - 로드할 채팅 ID
      * @param {boolean} isEmptyChat - 메시지가 0개인 채팅인지 (규칙 5: 새로고침 후 돌아오면 그리팅 추가)
      */
@@ -3258,6 +4990,8 @@ class ChatManager {
             if (typeof showErrorCodeToast === 'function') {
                 showErrorCodeToast('WARN_CHAT_20015', `채팅을 찾을 수 없음: ${chatId}`);
             }
+            // 로딩 플래그 해제 (finally 블록 실행 전)
+            this._isLoadingChat = false;
             return;
         }
 
@@ -3295,6 +5029,12 @@ class ChatManager {
         // 메타데이터 저장
         this.currentChatId = chatId;
         this.currentChatName = chatData.chatName;
+        // ⚠️ 중요: this.currentCharacterId 설정 (메시지 렌더링 시 정규식 적용을 위해 필요)
+        // 이유: addMessage에서 정규식을 적용하려면 this.currentCharacterId가 필요함
+        // loadChat이 직접 호출되는 경우(채팅 목록에서 선택 등)에도 정규식이 적용되도록 함
+        // 이전에 제거했던 이유: 비동기 작업 중 다른 캐릭터 선택 가능성
+        // 하지만 addMessage에서 정규식 적용을 위해 필요하므로 복원
+        // 대안: addMessage에 characterId 매개변수 추가 (더 큰 수정 필요)
         this.currentCharacterId = chatData.characterId;
         this.chatCreateDate = chatData.metadata.create_date || Date.now();
 
@@ -3311,9 +5051,9 @@ class ChatManager {
         
         // 캐릭터 정보 가져오기 (아바타 포함)
         // CharacterStorage - 전역 스코프에서 사용
-        // 먼저 채팅의 characterId로 로드 시도, 없으면 현재 선택된 캐릭터로 폴백
-        let character = await CharacterStorage.load(this.currentCharacterId);
-        // 캐릭터를 찾을 수 없으면 (삭제된 경우), 현재 선택된 캐릭터로 폴백
+        // ⚠️ 중요: chatData.characterId를 직접 사용 (this.currentCharacterId는 설정하지 않음)
+        let character = await CharacterStorage.load(chatData.characterId);
+        // 캐릭터를 찾을 수 없으면 (삭제된 경우), SettingsStorage에서 현재 선택된 캐릭터로 폴백
         if (!character) {
             // 경고 코드 토스트 알림 표시
             if (typeof showErrorCodeToast === 'function') {
@@ -3322,12 +5062,9 @@ class ChatManager {
             // SettingsStorage - 전역 스코프에서 사용
             const settings = await SettingsStorage.load();
             const currentCharId = settings.currentCharacterId;
-            if (currentCharId && currentCharId !== this.currentCharacterId) {
+            if (currentCharId && currentCharId !== chatData.characterId) {
                 character = await CharacterStorage.load(currentCharId);
-                if (character) {
-                    // 현재 캐릭터로 업데이트
-                    this.currentCharacterId = currentCharId;
-                }
+                // ⚠️ 중요: this.currentCharacterId는 설정하지 않음 (selectCharacter에서만 설정)
             }
         }
         
@@ -3358,12 +5095,13 @@ class ChatManager {
                 : Number.MAX_SAFE_INTEGER;
             
             // 실리태번과 동일: chat.length > count 이면 startIndex = chat.length - count
-            // 하지만 인덱스 0을 항상 포함하려면 startIndex는 최대 1이어야 함
+            // 실리태번: if (chat.length > count) { startIndex = chat.length - count; }
+            // 단순하게 startIndex부터 끝까지 렌더링 (인덱스 0을 특별히 처리하지 않음)
             if (this.chat.length > count) {
-                const calculatedStartIndex = this.chat.length - count;
-                // 인덱스 0을 항상 포함: startIndex가 0이거나 1이어야 함
-                // 인덱스 0 + 최근 count-1개 = 총 count개
-                startIndex = Math.max(1, calculatedStartIndex); // 최소 1로 설정하여 인덱스 0이 항상 포함되도록
+                startIndex = this.chat.length - count;
+            } else {
+                // 메시지 수가 count 이하면 모든 메시지 표시
+                startIndex = 0;
             }
             
             console.log('[ChatManager.loadChat] 메시지 렌더링 정보:', {
@@ -3397,139 +5135,11 @@ class ChatManager {
             
             console.log('[ChatManager.loadChat] 기존 DOM 메시지 UUID 수:', existingUuids.size);
             
-            // 실리태번과 동일: 인덱스 0부터 startIndex-1까지 렌더링 (인덱스 0 보장)
-            // 인덱스 0을 항상 포함하므로, 0부터 startIndex까지 모두 렌더링
-            for (let i = 0; i < Math.min(startIndex || 1, this.chat.length); i++) {
-                const message = this.chat[i];
-                if (!message) continue;
-                
-                // 이미 DOM에 있는 메시지는 건너뛰기 (중복 방지)
-                if (message.uuid && existingUuids.has(message.uuid)) {
-                    console.log('[ChatManager.loadChat] 중복 메시지 건너뛰기 (인덱스 0-범위):', {
-                        index: i,
-                        uuid: message.uuid.substring(0, 8),
-                        send_date: message.send_date
-                    });
-                    renderedIndexes.add(i);
-                    continue;
-                }
-                
-            // 실리태번과 동일: force_avatar 가져오기 (유저 메시지에만)
-                // force_avatar가 페르소나 이름일 수 있으므로 실제 아바타 이미지 URL로 변환
-                let userAvatar = message.force_avatar || null;
-                
-                // 유저 메시지인 경우 페르소나 아바타 처리
-                if (message.is_user) {
-                    // force_avatar가 있고 이미지 URL이 아닌 경우 (페르소나 이름일 가능성)
-                    if (userAvatar && !userAvatar.startsWith('data:') && !userAvatar.startsWith('http://') && !userAvatar.startsWith('https://')) {
-                        // 페르소나 이름으로 페르소나 찾기
-                        try {
-                            const allPersonas = await UserPersonaStorage.loadAll();
-                            // 페르소나 이름으로 찾기 (정확한 이름 매칭)
-                            let foundPersona = null;
-                            for (const [personaId, persona] of Object.entries(allPersonas)) {
-                                if (persona?.name === userAvatar || personaId === userAvatar) {
-                                    foundPersona = persona;
-                                    break;
-                                }
-                            }
-                            // 이름이 찾아지면 아바타 이미지로 변환
-                            if (foundPersona && foundPersona.avatar) {
-                                userAvatar = foundPersona.avatar;
-                            }
-                        } catch (e) {
-                            // 페르소나 찾기 실패 시 원본 그대로 사용
-                            console.debug('[ChatManager] 페르소나 찾기 실패 (force_avatar), 원본 사용:', userAvatar);
-                        }
-                    }
-                    
-                    // force_avatar가 없거나 이미지 URL이 아닌 경우, message.name으로 페르소나 찾기 시도
-                    if (!userAvatar || (!userAvatar.startsWith('data:') && !userAvatar.startsWith('http://') && !userAvatar.startsWith('https://'))) {
-                        const userName = message.name || '';
-                        if (userName) {
-                            try {
-                                const allPersonas = await UserPersonaStorage.loadAll();
-                                // 메시지의 name 필드와 일치하는 페르소나 찾기
-                                let foundPersona = null;
-                                for (const [personaId, persona] of Object.entries(allPersonas)) {
-                                    if (persona?.name === userName) {
-                                        foundPersona = persona;
-                                        break;
-                                    }
-                                }
-                                // 페르소나가 찾아지고 아바타가 있으면 사용
-                                if (foundPersona && foundPersona.avatar) {
-                                    userAvatar = foundPersona.avatar;
-                                    console.debug('[ChatManager.loadChat] message.name으로 페르소나 아바타 찾음:', {
-                                        userName,
-                                        personaName: foundPersona.name,
-                                        hasAvatar: !!foundPersona.avatar
-                                    });
-                                }
-                            } catch (e) {
-                                console.debug('[ChatManager] 페르소나 찾기 실패 (message.name), 원본 사용:', userName);
-                            }
-                        }
-                    }
-                }
-            
-            // 실리태번과 동일: 메시지 고유 ID 및 send_date 가져오기
-            const messageUuid = message.uuid || null;
-            const sendDate = message.send_date || null;
-            
-            // 원본 메시지 텍스트 확인 (매크로 포함 여부)
-            const originalMessageText = message.mes || '';
-            
-            // 실리태번과 동일: 메시지의 name 필드 확인 (다른 캐릭터가 보낸 메시지 처리)
-            // message.name이 있고 characterName과 다르면, message.name을 사용하고 아바타는 기본 아이콘으로
-            let messageCharacterName = characterName;
-            let messageCharacterAvatar = characterAvatar;
-            
-            if (!message.is_user && message.name) {
-                // 메시지의 name 필드가 characterName과 다른 경우 (다른 캐릭터가 보낸 메시지)
-                if (message.name !== characterName) {
-                    messageCharacterName = message.name;
-                    messageCharacterAvatar = null; // 다른 캐릭터는 기본 아이콘 사용
-                }
-            }
-            
-            const wrapper = await this.addMessage(
-                message.mes,
-                message.is_user ? 'user' : 'assistant',
-                message.is_user ? null : messageCharacterName,
-                message.is_user ? null : messageCharacterAvatar,
-                message.extra?.swipes || [],
-                0,
-                message.is_user ? userAvatar : null,
-                sendDate || null // send_date 전달
-            );
-            
-            // 실리태번과 동일: 저장된 UUID와 send_date를 DOM에 복원 (구 메시지 호환)
-                // 실리태번: addOneMessage(item, { forceId: i }) - 원본 배열 인덱스 저장
-            if (messageUuid) {
-                wrapper.dataset.messageUuid = messageUuid;
-                    existingUuids.add(messageUuid);
-            }
-            if (sendDate) {
-                wrapper.dataset.sendDate = sendDate.toString();
-            }
-                // 실리태번과 동일: 원본 배열 인덱스 저장 (forceId)
-                wrapper.dataset.messageIndex = i.toString();
-            
-            messageWrappers.push(wrapper);
-                renderedIndexes.add(i);
-            }
-            
             // 실리태번과 동일: for (let i = startIndex; i < chat.length; i++)
-            // startIndex부터 끝까지 렌더링
+            // startIndex부터 끝까지 순서대로 렌더링 (단순하게)
             for (let i = startIndex; i < this.chat.length; i++) {
                 const message = this.chat[i];
                 if (!message) continue;
-                
-                // 이미 렌더링된 인덱스는 건너뛰기
-                if (renderedIndexes.has(i)) {
-                    continue;
-        }
                 
                 // 이미 DOM에 있는 메시지는 건너뛰기 (중복 방지)
                 if (message.uuid && existingUuids.has(message.uuid)) {
@@ -3587,7 +5197,7 @@ class ChatManager {
                                 
                                 if (foundPersona && foundPersona.avatar && (foundPersona.avatar.startsWith('data:') || foundPersona.avatar.startsWith('http://') || foundPersona.avatar.startsWith('https://'))) {
                                     userAvatar = foundPersona.avatar;
-                                    console.debug('[ChatManager.loadChat] 파일명으로 페르소나 아바타 찾음 (startIndex):', {
+                                    console.debug('[ChatManager.loadChat] 파일명으로 페르소나 아바타 찾음:', {
                                         filename: message.force_avatar,
                                         personaName: foundPersona.name,
                                         hasAvatar: !!foundPersona.avatar
@@ -3596,7 +5206,7 @@ class ChatManager {
                                     userAvatar = null; // 찾지 못하면 기본 아이콘 사용
                                 }
                             } catch (e) {
-                                console.debug('[ChatManager] 파일명으로 페르소나 찾기 실패 (startIndex):', e);
+                                console.debug('[ChatManager] 파일명으로 페르소나 찾기 실패:', e);
                                 userAvatar = null;
                             }
                         } else {
@@ -3636,7 +5246,7 @@ class ChatManager {
                                 // 페르소나가 찾아지고 아바타가 있으면 사용
                                 if (foundPersona && foundPersona.avatar) {
                                     userAvatar = foundPersona.avatar;
-                                    console.debug('[ChatManager.loadChat] message.name으로 페르소나 아바타 찾음 (startIndex):', {
+                                    console.debug('[ChatManager.loadChat] message.name으로 페르소나 아바타 찾음:', {
                                         userName,
                                         personaName: foundPersona.name,
                                         hasAvatar: !!foundPersona.avatar
@@ -3652,16 +5262,16 @@ class ChatManager {
                 // 실리태번과 동일: 메시지 고유 ID 및 send_date 가져오기
                 const messageUuid = message.uuid || null;
                 const sendDate = message.send_date || null;
-                const originalMessageText = message.mes || '';
                 
-                // 실리태번과 동일: 메시지의 name 필드 확인
+                // 실리태번과 동일: 메시지의 name 필드 확인 (다른 캐릭터가 보낸 메시지 처리)
                 let messageCharacterName = characterName;
                 let messageCharacterAvatar = characterAvatar;
                 
                 if (!message.is_user && message.name) {
+                    // 메시지의 name 필드가 characterName과 다른 경우 (다른 캐릭터가 보낸 메시지)
                     if (message.name !== characterName) {
                         messageCharacterName = message.name;
-                        messageCharacterAvatar = null;
+                        messageCharacterAvatar = null; // 다른 캐릭터는 기본 아이콘 사용
                     }
                 }
                 
@@ -3673,16 +5283,22 @@ class ChatManager {
                     message.extra?.swipes || [],
                     0,
                     message.is_user ? userAvatar : null,
-                    sendDate || null
+                    sendDate || null, // send_date 전달
+                    message.extra?.reasoning || null // 추론 내용 복원
                 );
                 
-                // 실리태번과 동일: 저장된 UUID와 send_date를 DOM에 복원
+                // 실리태번과 동일: 저장된 UUID와 send_date를 DOM에 복원 (구 메시지 호환)
+                // 실리태번: addOneMessage(item, { forceId: i }) - 원본 배열 인덱스 저장
                 if (messageUuid) {
                     wrapper.dataset.messageUuid = messageUuid;
                     existingUuids.add(messageUuid);
                 }
                 if (sendDate) {
                     wrapper.dataset.sendDate = sendDate.toString();
+                }
+                // 추론 내용도 dataset에 저장 (saveChat에서 읽기 위해)
+                if (message.extra?.reasoning) {
+                    wrapper.dataset.reasoning = message.extra.reasoning;
                 }
                 // 실리태번과 동일: 원본 배열 인덱스 저장 (forceId: i)
                 wrapper.dataset.messageIndex = i.toString();
@@ -3702,10 +5318,9 @@ class ChatManager {
             });
 
         // 숨겨진 메시지가 있으면 "더보기" 버튼 추가
-            // 실리태번과 동일: startIndex > 1이면 더 로드할 메시지가 있음
-            // 인덱스 0은 이미 포함되었고, startIndex부터 끝까지도 포함되었으므로
-            // 인덱스 1부터 startIndex-1까지가 숨겨진 메시지
-            if (startIndex > 1 && this.chat.length > renderedIndexes.size) {
+            // 실리태번과 동일: startIndex > 0이면 더 로드할 메시지가 있음
+            // startIndex부터 끝까지 렌더링했으므로, 인덱스 0부터 startIndex-1까지가 숨겨진 메시지
+            if (startIndex > 0 && this.chat.length > renderedIndexes.size) {
             // 채팅 데이터를 인스턴스에 저장 (더보기 버튼에서 사용)
             this._storedChatData = chatData;
             this._storedCharacterName = characterName;
@@ -3778,10 +5393,48 @@ class ChatManager {
             }
         }
 
+        // 중요: character.chat 업데이트 (불러온 채팅이 가장 최근 채팅이 되도록)
+        // try 블록 끝에서 실행하여 채팅 로드가 완전히 완료된 후에만 실행됨
+        // 이렇게 하면 홈화면으로 나갔다가 다시 캐릭터를 선택할 때 불러온 채팅이 자동으로 로드됨
+        // ⚠️ 중요: chatData.characterId를 직접 사용 (this.currentCharacterId는 비동기 중 변경될 수 있음)
+        const chatCharacterId = chatData.characterId;
+        if (chatCharacterId && this.currentChatName) {
+            try {
+                const character = await CharacterStorage.load(chatCharacterId);
+                if (character) {
+                    const oldChatName = character.chat;
+                    character.chat = this.currentChatName;
+                    await CharacterStorage.save(chatCharacterId, character);
+                    console.log('[ChatManager.loadChat] ✅ character.chat 업데이트 완료:', {
+                        characterId: chatCharacterId,
+                        oldChatName: oldChatName || '(none)',
+                        newChatName: this.currentChatName,
+                        chatId: chatId
+                    });
+                } else {
+                    console.warn('[ChatManager.loadChat] ⚠️ 캐릭터를 찾을 수 없음:', chatCharacterId);
+                }
+            } catch (error) {
+                // 오류 코드 토스트 알림 표시
+                if (typeof showErrorCodeToast === 'function') {
+                    showErrorCodeToast('ERR_CHAT_3016', 'character.chat 업데이트 실패', error);
+                }
+                console.error('[ChatManager.loadChat] ❌ character.chat 업데이트 실패:', error);
+            }
+        } else {
+            console.warn('[ChatManager.loadChat] ⚠️ character.chat 업데이트 건너뜀:', {
+                hasCharacterId: !!chatCharacterId,
+                hasChatName: !!this.currentChatName,
+                chatCharacterId: chatCharacterId,
+                currentChatName: this.currentChatName
+            });
+        }
+
         // 규칙 5: 메시지가 0개인 채팅을 새로고침하거나 다른 곳에서 돌아오면 그리팅 추가
         if (isEmptyChat && messages.length === 0) {
             // 캐릭터 정보 다시 가져오기 (최신 상태)
-            const latestCharacter = await CharacterStorage.load(this.currentCharacterId);
+            // ⚠️ 중요: chatData.characterId를 사용 (this.currentCharacterId는 설정하지 않으므로 사용하지 않음)
+            const latestCharacter = await CharacterStorage.load(chatCharacterId);
             if (latestCharacter) {
                 const firstMessage = latestCharacter?.data?.first_mes || latestCharacter?.first_mes || latestCharacter?.data?.first_message || '';
                 const alternateGreetings = latestCharacter?.data?.alternate_greetings || latestCharacter?.alternate_greetings || [];
@@ -3823,7 +5476,14 @@ class ChatManager {
             }
         } finally {
             // 로딩 완료 플래그 해제
+            console.log('[ChatManager.loadChat] finally 블록 실행 - _isLoadingChat 플래그 해제');
             this._isLoadingChat = false;
+            console.log('[ChatManager.loadChat] ✅ _isLoadingChat 플래그 해제 완료');
+            
+            // 중요: this.chat 배열은 모든 메시지를 유지해야 함
+            // DOM에는 messagesToLoad 설정에 따라 일부만 표시되지만, this.chat은 전체 메시지를 유지
+            // saveChat에서 병합 로직이 있으므로, 여기서 DOM과 동기화할 필요 없음
+            // 삭제된 메시지는 deleteMessage나 regenerateMessage에서 this.chat에서 제거됨
             
             // 채팅 목록 패널이 열려있으면 자동 새로고침 (현재 채팅 표시 업데이트, 즉시 실행)
             if (window.panelManager) {
@@ -3928,6 +5588,10 @@ class ChatManager {
             // 채팅 생성 시간을 send_date로 전달하여 첫 번째 메시지임을 보장
             // send_date가 가장 작으면 정렬 시 인덱스 0에 위치하게 됨
             await this.addMessage(processedGreeting, 'assistant', characterName, characterAvatar, swipes, 0, null, this.chatCreateDate || Date.now());
+            
+            // 새 채팅 생성 직후 그리팅 추가 시 즉시 저장하여 채팅 목록에 바로 표시되도록 함
+            // 디바운스를 사용하지 않고 즉시 저장 (새 채팅은 목록에 빠르게 나타나야 함)
+            await this.saveChat();
         } else {
             // 그리팅이 없어도 채팅은 저장되어야 함 (규칙 4: 0개 메시지 채팅도 채팅으로 인정)
             // 그리팅이 없는 경우 즉시 0개 메시지 채팅으로 저장
@@ -3954,10 +5618,9 @@ class ChatManager {
             }
         }
 
-        
-        // 채팅 목록 패널이 열려있으면 새 채팅 목록에 반영 (즉시 실행)
-                                if (window.panelManager) {
-            // requestAnimationFrame 제거하여 즉시 업데이트
+        // 채팅 목록 패널이 열려있으면 새 채팅 목록에 반영 (saveChat 완료 후)
+        // saveChat이 완료되어 currentChatId가 설정된 후에 호출해야 함
+        if (window.panelManager) {
             window.panelManager.refreshChatListPanel(characterId).catch(error => {
                 console.debug('[ChatManager.createNewChat] 채팅 목록 패널 새로고침 오류:', error);
             });
@@ -3967,6 +5630,23 @@ class ChatManager {
     /**
      * 채팅 로드 또는 생성
      * 캐릭터 선택 시 마지막 채팅 로드 또는 새 채팅 생성
+     * 
+     * ⚠️ 중요: 이 함수는 다음 기능들과 강하게 연동되어 있습니다.
+     * 
+     * [연동 기능]
+     * 1. character.chat: 저장된 채팅 이름을 우선 찾음 (importChat에서 업데이트됨)
+     * 2. imported_date 정렬: 불러온 채팅은 imported_date를 lastMessageDate로 사용하여 최신순 정렬
+     *    * 불러온 채팅: lastMessageDate = imported_date (최신순 정렬)
+     *    * 일반 채팅: lastMessageDate = 마지막 메시지의 send_date
+     * 3. loadChat: 찾은 채팅을 loadChat으로 로드 (messagesToLoad, 더보기 버튼 적용)
+     * 4. createNewChat: 채팅이 없으면 새 채팅 생성
+     * 
+     * [수정 시 주의사항]
+     * - 정렬 로직 변경 시 → importChat의 imported_date 설정과 일치해야 함
+     * - character.chat 찾기 로직 변경 시 → importChat에서 character.chat 업데이트 확인
+     * - 채팅이 없을 때 새 채팅 생성 조건 변경 시 → saveChat에서 새 채팅 생성 방지 로직 확인
+     *   * saveChat에서 currentChatId 없고 DOM 메시지 1개 이하면 저장 건너뜀
+     * 
      * @param {string} characterId - 캐릭터 ID
      */
     async loadOrCreateChat(characterId) {
@@ -4411,6 +6091,10 @@ class ChatManager {
             
             await this.loadChat(chatToLoad.chatId, chatToLoad.messageCount === 0);
             
+            // ⚠️ 중요: loadChat 후에 this.currentCharacterId 설정
+            // loadChat에서는 this.currentCharacterId를 설정하지 않으므로 여기서 설정
+            this.currentCharacterId = characterId;
+            
             // 캐릭터의 현재 채팅 정보 업데이트 (character.chat)
             character.chat = chatToLoad.chatData.chatName;
             await CharacterStorage.save(characterId, character);
@@ -4432,6 +6116,11 @@ class ChatManager {
             character.chat = chatToLoad.chatData.chatName;
             await CharacterStorage.save(characterId, character);
             await this.loadChat(chatToLoad.chatId, chatToLoad.messageCount === 0);
+            
+            // ⚠️ 중요: loadChat 후에 this.currentCharacterId 설정
+            // loadChat에서는 this.currentCharacterId를 설정하지 않으므로 여기서 설정
+            this.currentCharacterId = characterId;
+            
             return;
         }
 
@@ -4550,8 +6239,16 @@ class ChatManager {
      * 스와이프 제스처 설정 (터치 이벤트)
      * @param {HTMLElement} wrapper - 메시지 래퍼 요소
      * @param {HTMLElement} messageDiv - 메시지 요소
+     * 
+     * 참고: 모바일에서 메시지를 옆으로 스와이프하는 동작을 비활성화함
+     * (사용자 요청: 스와이프가 넘어가지 않도록)
      */
     setupSwipeGestures(wrapper, messageDiv) {
+        // 스와이프 제스처 비활성화 (모바일에서 메시지 스와이프 방지)
+        return;
+        
+        // 아래 코드는 사용하지 않음 (주석 처리)
+        /*
         let touchStartX = 0;
         let touchStartY = 0;
         let isSwiping = false;
@@ -4622,6 +6319,7 @@ class ChatManager {
         messageDiv.addEventListener('touchstart', handleTouchStart, { passive: true });
         messageDiv.addEventListener('touchmove', handleTouchMove, { passive: true });
         messageDiv.addEventListener('touchend', handleTouchEnd, { passive: true });
+        */
     }
     
     /**
@@ -4918,36 +6616,60 @@ class ChatManager {
         const messageText = messageWrapper.querySelector('.message-text');
         if (!messageText) return;
         
-        // 원본 텍스트 가져오기 (dataset에서 우선, 없으면 스와이프 데이터에서, 없으면 HTML에서 추출)
-        let originalText = messageWrapper.dataset.originalText;
+        // 실리태번과 동일: this.chat 배열에서 메시지 찾기 (이미 저장된 메시지 텍스트 사용)
+        const messageUuid = messageWrapper.dataset.messageUuid;
+        let editText = '';
         
-        // dataset에 없고 스와이프가 있는 경우 스와이프 데이터에서 가져오기
-        if (!originalText) {
-            const swipesData = messageWrapper.dataset.swipes;
-            if (swipesData) {
-                const swipes = JSON.parse(swipesData);
-                const currentIndex = parseInt(messageWrapper.dataset.swipeIndex || '0');
-                originalText = swipes[currentIndex] || '';
+        if (messageUuid && this.chat) {
+            const chatMessage = this.chat.find(msg => msg.uuid === messageUuid);
+            if (chatMessage && chatMessage.mes) {
+                // 실리태번과 동일: chat[editMessageId].mes 사용
+                editText = chatMessage.mes.trim();
+                
+                // 스와이프가 있는 경우 현재 스와이프 텍스트 사용
+                const swipesData = messageWrapper.dataset.swipes;
+                if (swipesData) {
+                    const swipes = JSON.parse(swipesData);
+                    const currentIndex = parseInt(messageWrapper.dataset.swipeIndex || '0');
+                    if (chatMessage.swipes && Array.isArray(chatMessage.swipes) && chatMessage.swipes[currentIndex]) {
+                        editText = chatMessage.swipes[currentIndex].trim();
+                    }
+                }
+                
+                console.log('[ChatManager.editMessage] 편집 입력창 텍스트:', {
+                    uuid: messageUuid.substring(0, 8),
+                    editText: editText.substring(0, 50),
+                    source: 'this.chat[].mes'
+                });
             }
         }
         
-        // 그래도 없으면 HTML에서 추출 (폴백)
-        if (!originalText) {
-            originalText = this.extractTextFromHTML(messageText.innerHTML);
+        // 폴백: dataset이나 HTML에서 추출
+        if (!editText) {
+            editText = messageWrapper.dataset.originalText || this.extractTextFromHTML(messageText.innerHTML);
+            editText = editText ? editText.trim() : '';
+            
+            if (editText) {
+                console.log('[ChatManager.editMessage] 편집 입력창 텍스트 (폴백):', {
+                    uuid: messageUuid ? messageUuid.substring(0, 8) : 'unknown',
+                    editText: editText.substring(0, 50),
+                    source: 'dataset.originalText or HTML'
+                });
+            }
         }
         
-        if (!originalText || !originalText.trim()) return;
+        if (!editText) return;
         
         // 편집 모드로 표시
         messageWrapper.classList.add('editing');
         
-        // 원본 텍스트 저장 (편집 모달에서는 원본 텍스트를 그대로 표시)
-        messageWrapper.dataset.originalText = originalText;
+        // 원본 텍스트 저장 (취소 시 사용)
+        messageWrapper.dataset.originalText = editText;
         
-        // 메시지 텍스트를 textarea로 교체 (원본 텍스트 그대로 표시)
+        // 메시지 텍스트를 textarea로 교체 (실리태번과 동일: chat[editMessageId].mes 사용)
         const editTextarea = document.createElement('textarea');
         editTextarea.className = 'message-edit-textarea';
-        editTextarea.value = originalText; // 원본 텍스트 ({{user}}, {{char}} 포함)
+        editTextarea.value = editText; // 저장된 메시지 텍스트 (이미 정규식 적용된 상태)
         editTextarea.setAttribute('rows', '1');
         
         // textarea 높이 자동 조절
@@ -4968,6 +6690,12 @@ class ChatManager {
         // 메시지 텍스트 교체
         messageText.style.display = 'none';
         messageText.parentNode.insertBefore(editTextarea, messageText);
+        
+        // 초기 높이 자동 조절 (실리태번과 동일: height(0) 후 height(scrollHeight))
+        // DOM에 추가된 후에야 scrollHeight가 정확히 계산됨
+        requestAnimationFrame(() => {
+            adjustHeight();
+        });
         
         // 편집 버튼 숨기기
         const actionButtons = messageWrapper.querySelector('.message-action-buttons');
@@ -5009,7 +6737,7 @@ class ChatManager {
         // textarea 포커스 및 높이 조절
         setTimeout(() => {
             editTextarea.focus();
-            editTextarea.setSelectionRange(originalText.length, originalText.length);
+            editTextarea.setSelectionRange(editText.length, editText.length);
             adjustHeight();
         }, 10);
         
@@ -5027,6 +6755,12 @@ class ChatManager {
     
     /**
      * 편집 저장
+     * 
+     * ⚠️ 중요: 정규식과 HTML 렌더링 제한 적용
+     * - 정규식 적용: isEdit: true로 전달 (runOnEdit이 true인 스크립트만 적용)
+     * - HTML 렌더링 제한: 메시지 저장 후 applyHtmlRenderLimit 적용 (렌더링 제한이 정규식보다 우선)
+     * - 정규식이 적용된 HTML 콘텐츠도 렌더링 제한에 따라 플레이스홀더로 표시될 수 있음
+     * 
      * @param {HTMLElement} messageWrapper - 메시지 래퍼 요소
      * @param {HTMLTextAreaElement} editTextarea - 편집 textarea
      */
@@ -5074,9 +6808,32 @@ class ChatManager {
             };
             
             // 디버그: 직접 편집 시 정규식 옵션 확인
-            console.debug('[ChatManager.saveEdit] 정규식 옵션:', JSON.stringify(regexOptions, (key, value) => value === undefined ? 'undefined' : value));
+            console.log('[ChatManager.saveEdit] 정규식 호출 전:', {
+                isAssistant,
+                isUser,
+                placement,
+                newText: newText.substring(0, 50),
+                regexOptions: {
+                    characterOverride: regexOptions.characterOverride,
+                    isMarkdown: regexOptions.isMarkdown === undefined ? 'undefined' : regexOptions.isMarkdown,
+                    isPrompt: regexOptions.isPrompt === undefined ? 'undefined' : regexOptions.isPrompt,
+                    isEdit: regexOptions.isEdit,
+                    depth: regexOptions.depth
+                }
+            });
             
-            processedText = await getRegexedString(newText, placement, regexOptions);
+            try {
+                processedText = await getRegexedString(newText, placement, regexOptions);
+                console.log('[ChatManager.saveEdit] 정규식 호출 후:', {
+                    processedText: processedText.substring(0, 50),
+                    changed: newText !== processedText
+                });
+            } catch (error) {
+                console.error('[ChatManager.saveEdit] 정규식 호출 오류:', error);
+                processedText = newText; // 오류 시 원본 텍스트 사용
+            }
+        } else {
+            console.log('[ChatManager.saveEdit] 정규식 스킵: 메시지 타입이 assistant나 user가 아님', { isAssistant, isUser });
         }
         
         // 사용자 이름과 캐릭터 이름 가져오기 (매크로 치환용)
@@ -5129,11 +6886,13 @@ class ChatManager {
         }
         
         // {{user}}, {{char}} 매크로 치환 적용 (저장용 텍스트)
+        // 실리태번과 동일: updateMessage에서 getRegexedString(isEdit: true) 후 substituteParams만 적용
         const processedTextForStorage = substituteParams(processedText, userName, charName);
         
-        // DOM 표시용: isMarkdown: true로 정규식 다시 적용 (markdownOnly 정규식도 포함)
-        // 실리태번과 동일: 표시 시에는 항상 isMarkdown: true
-        let processedTextForDisplay = newText;
+        // DOM 표시용: 실리태번과 동일하게 저장된 텍스트에 isMarkdown: true로 정규식 다시 적용
+        // 실리태번의 messageFormatting 함수 참고: getRegexedString(mes, regexPlacement, { isMarkdown: true, ... })
+        // 표시 시에는 항상 isMarkdown: true로 정규식 적용 (markdownOnly 정규식 포함)
+        let processedTextForDisplay = processedTextForStorage;
         if (isAssistant || isUser) {
             const placement = isAssistant ? REGEX_PLACEMENT.AI_OUTPUT : REGEX_PLACEMENT.USER_INPUT;
             const regexOptionsForDisplay = {
@@ -5144,19 +6903,69 @@ class ChatManager {
                 depth: depth
             };
             
-            processedTextForDisplay = await getRegexedString(newText, placement, regexOptionsForDisplay);
+            // 저장된 텍스트에 markdownOnly 정규식 추가 적용
+            processedTextForDisplay = await getRegexedString(processedTextForStorage, placement, regexOptionsForDisplay);
         }
         
-        // {{user}}, {{char}} 매크로 치환 적용 (표시용 텍스트)
-        const processedTextForDisplayWithMacros = substituteParams(processedTextForDisplay, userName, charName);
+        // {{user}}, {{char}} 매크로 치환 적용 (표시용 텍스트 - 이미 적용되었지만 혹시 모를 경우를 위해)
+        const processedTextForDisplayWithMacros = processedTextForDisplay;
+        
+        // HTML 렌더링 제한 확인 (범위 밖 메시지는 렌더링하지 않음)
+        let shouldSkipHtmlRender = false;
+        try {
+            const settings = await SettingsStorage.load();
+            const htmlRenderLimit = settings.htmlRenderLimit ?? 0;
+            
+            console.log('[ChatManager.saveEdit] HTML 렌더링 제한 확인 시작:', {
+                htmlRenderLimit,
+                settingsHasLimit: 'htmlRenderLimit' in settings
+            });
+            
+            if (htmlRenderLimit > 0) {
+                // 모든 메시지 래퍼 가져오기
+                const allMessageWrappers = Array.from(this.elements.chatMessages.querySelectorAll('.message-wrapper'))
+                    .filter(wrapper => !wrapper.classList.contains('message-hidden') && wrapper.style.display !== 'none');
+                
+                // 역순 인덱스 계산: 최근 메시지가 인덱스 0, 1, 2...
+                const reversedWrappers = [...allMessageWrappers].reverse();
+                const messageIndex = reversedWrappers.indexOf(messageWrapper);
+                
+                // 범위 밖이면 렌더링 건너뛰기
+                if (messageIndex >= htmlRenderLimit) {
+                    shouldSkipHtmlRender = true;
+                }
+                
+                console.log('[ChatManager.saveEdit] HTML 렌더링 제한 확인:', {
+                    htmlRenderLimit,
+                    totalMessages: allMessageWrappers.length,
+                    messageIndex,
+                    shouldSkipHtmlRender,
+                    messageUuid: messageWrapper.dataset.messageUuid?.substring(0, 8)
+                });
+            } else {
+                console.log('[ChatManager.saveEdit] HTML 렌더링 제한 없음 (htmlRenderLimit: 0)');
+            }
+        } catch (error) {
+            // 오류 시 기본적으로 렌더링
+            console.warn('[ChatManager.saveEdit] HTML 렌더링 제한 확인 실패:', error);
+        }
         
         // 새 텍스트로 업데이트 (표시용: isMarkdown: true로 정규식 적용된 텍스트)
         const content = messageWrapper.querySelector('.message-content');
         // 기존 iframe 등 모든 동적 콘텐츠 제거를 위해 innerHTML 완전 교체
         messageText.innerHTML = '';
-        messageText.innerHTML = messageFormatting(processedTextForDisplayWithMacros, userName, charName);
-        // iframe 재렌더링 (편집 완료 시 선택지 등도 업데이트)
-        this.renderHtmlIframesInElement(messageText);
+        
+        if (shouldSkipHtmlRender) {
+            // 범위 밖이면 messageFormatting으로 iframe을 생성한 후 플레이스홀더로 교체
+            messageText.innerHTML = messageFormatting(processedTextForDisplayWithMacros, userName, charName);
+            // 플레이스홀더로 교체 (skipRender: true)
+            this.renderHtmlIframesInElement(messageText, true);
+        } else {
+            // 범위 내이면 messageFormatting으로 렌더링
+            messageText.innerHTML = messageFormatting(processedTextForDisplayWithMacros, userName, charName);
+            // iframe 재렌더링 (편집 완료 시 선택지 등도 업데이트)
+            this.renderHtmlIframesInElement(messageText, false);
+        }
         messageText.style.display = '';
         
         // textarea 제거
@@ -5183,7 +6992,14 @@ class ChatManager {
             const messageIndex = this.chat.findIndex(msg => msg.uuid === messageUuid);
             if (messageIndex !== -1) {
                 // 메시지 내용 업데이트 (저장용: isMarkdown 없이 정규식 적용된 텍스트)
+                const oldText = this.chat[messageIndex].mes;
                 this.chat[messageIndex].mes = processedTextForStorage;
+                console.log('[ChatManager.saveEdit] this.chat 배열 업데이트:', {
+                    uuid: messageUuid.substring(0, 8),
+                    oldText: oldText?.substring(0, 50),
+                    newText: processedTextForStorage.substring(0, 50),
+                    changed: oldText !== processedTextForStorage
+                });
                 // 스와이프가 있으면 현재 스와이프도 업데이트
                 if (swipesData) {
                     const swipes = JSON.parse(swipesData);
@@ -5192,7 +7008,8 @@ class ChatManager {
                         this.chat[messageIndex].swipes[currentIndex] = processedTextForStorage;
                     }
                 }
-                console.debug('[ChatManager.saveEdit] this.chat 배열 업데이트 완료:', messageUuid.substring(0, 8));
+            } else {
+                console.warn('[ChatManager.saveEdit] this.chat에서 메시지를 찾을 수 없음:', messageUuid.substring(0, 8));
             }
         }
         
@@ -5203,6 +7020,12 @@ class ChatManager {
     
     /**
      * 편집 취소
+     * 
+     * ⚠️ 중요: 정규식과 HTML 렌더링 제한 적용
+     * - 정규식 적용: 원본 텍스트에 isMarkdown: true로 전달 (모든 정규식 스크립트 적용)
+     * - HTML 렌더링 제한: 메시지 복원 후 applyHtmlRenderLimit 적용 (렌더링 제한이 정규식보다 우선)
+     * - 정규식이 적용된 HTML 콘텐츠도 렌더링 제한에 따라 플레이스홀더로 표시될 수 있음
+     * 
      * @param {HTMLElement} messageWrapper - 메시지 래퍼 요소
      * @param {HTMLTextAreaElement} editTextarea - 편집 textarea
      */
@@ -5274,13 +7097,62 @@ class ChatManager {
         }
         const processedTextWithMacros = substituteParams(processedText, userName, charName);
         
+        // HTML 렌더링 제한 확인 (범위 밖 메시지는 렌더링하지 않음)
+        let shouldSkipHtmlRender = false;
+        try {
+            const settings = await SettingsStorage.load();
+            const htmlRenderLimit = settings.htmlRenderLimit ?? 0;
+            
+            console.log('[ChatManager.cancelEdit] HTML 렌더링 제한 확인 시작:', {
+                htmlRenderLimit,
+                settingsHasLimit: 'htmlRenderLimit' in settings
+            });
+            
+            if (htmlRenderLimit > 0) {
+                // 모든 메시지 래퍼 가져오기
+                const allMessageWrappers = Array.from(this.elements.chatMessages.querySelectorAll('.message-wrapper'))
+                    .filter(wrapper => !wrapper.classList.contains('message-hidden') && wrapper.style.display !== 'none');
+                
+                // 역순 인덱스 계산: 최근 메시지가 인덱스 0, 1, 2...
+                const reversedWrappers = [...allMessageWrappers].reverse();
+                const messageIndex = reversedWrappers.indexOf(messageWrapper);
+                
+                // 범위 밖이면 렌더링 건너뛰기
+                if (messageIndex >= htmlRenderLimit) {
+                    shouldSkipHtmlRender = true;
+                }
+                
+                console.log('[ChatManager.cancelEdit] HTML 렌더링 제한 확인:', {
+                    htmlRenderLimit,
+                    totalMessages: allMessageWrappers.length,
+                    messageIndex,
+                    shouldSkipHtmlRender,
+                    messageUuid: messageWrapper.dataset.messageUuid?.substring(0, 8)
+                });
+            } else {
+                console.log('[ChatManager.cancelEdit] HTML 렌더링 제한 없음 (htmlRenderLimit: 0)');
+            }
+        } catch (error) {
+            // 오류 시 기본적으로 렌더링
+            console.warn('[ChatManager.cancelEdit] HTML 렌더링 제한 확인 실패:', error);
+        }
+        
         // 정규식 적용된 텍스트로 복원 (기존 내용 완전히 교체)
         const content = messageWrapper.querySelector('.message-content');
         // 기존 iframe 등 모든 동적 콘텐츠 제거를 위해 innerHTML 완전 교체
         messageText.innerHTML = '';
-        messageText.innerHTML = messageFormatting(processedTextWithMacros, userName, charName);
-        // iframe 재렌더링 (편집 취소 시 선택지 등도 원래 상태로 복원)
-        this.renderHtmlIframesInElement(messageText);
+        
+        if (shouldSkipHtmlRender) {
+            // 범위 밖이면 messageFormatting으로 iframe을 생성한 후 플레이스홀더로 교체
+            messageText.innerHTML = messageFormatting(processedTextWithMacros, userName, charName);
+            // 플레이스홀더로 교체 (skipRender: true)
+            this.renderHtmlIframesInElement(messageText, true);
+        } else {
+            // 범위 내이면 messageFormatting으로 렌더링
+            messageText.innerHTML = messageFormatting(processedTextWithMacros, userName, charName);
+            // iframe 재렌더링 (편집 취소 시 선택지 등도 원래 상태로 복원)
+            this.renderHtmlIframesInElement(messageText, false);
+        }
         messageText.style.display = '';
         
         // textarea 제거
@@ -5321,6 +7193,14 @@ class ChatManager {
             }
             return;
         }
+        
+        // 메시지 삭제 플래그 설정 (그리팅 추가 방지용)
+        // 삭제 시작 시점에 플래그를 설정하여, 삭제 후 새 메시지 생성 시 그리팅이 추가되지 않도록 함
+        this._messageDeletedRecently = true;
+        // 5초 후 플래그 해제 (타임아웃으로 자동 해제)
+        setTimeout(() => {
+            this._messageDeletedRecently = false;
+        }, 5000);
         
         // 메시지 래퍼의 참조를 안전하게 저장 (다이얼로그 이후에도 유효하도록)
         const wrapperToDelete = messageWrapper;
@@ -5411,11 +7291,40 @@ class ChatManager {
         // 전송 버튼 상태 업데이트 (메시지 개수 변경 반영)
         this.updateSendButtonState();
         
-        // 채팅 저장 (삭제 즉시 반영 - 디바운스 없이 바로 저장)
-        // DOM 업데이트 완료 대기 (remove 후 DOM이 반영될 시간 확보)
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        // DOM 업데이트 완료 대기: 삭제된 메시지가 실제로 DOM에서 사라졌는지 확인
+        // remove()는 동기적으로 실행되지만, 브라우저가 DOM을 업데이트하는 데 시간이 걸릴 수 있음
+        let domUpdateComplete = false;
+        let retryCount = 0;
+        const maxRetries = 10;
         
+        while (!domUpdateComplete && retryCount < maxRetries) {
+            // DOM에서 삭제된 메시지가 실제로 사라졌는지 확인
+            const stillExists = this.elements.chatMessages.contains(wrapperToDelete);
+            if (!stillExists) {
+                domUpdateComplete = true;
+                break;
+            }
+            
+            // DOM 업데이트 대기
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            retryCount++;
+        }
+        
+        // 추가 안전장치: DOM 강제 리플로우
+        this.elements.chatMessages.offsetHeight;
+        
+        // 삭제된 메시지 UUID를 임시로 저장 (saveChat에서 사용)
+        if (deletedMessageUuid) {
+            this._deletedMessageUuids = new Set([deletedMessageUuid]);
+        }
+        
+        // 채팅 저장 (삭제 즉시 반영 - 디바운스 없이 바로 저장)
+        // 플래그는 함수 시작 부분에서 이미 설정됨
+        console.log('[deleteMessage] 저장 시작 (saveChat 호출)');
         await this.saveChat();
+        // 저장 완료 후 삭제된 UUID 추적 해제
+        this._deletedMessageUuids.clear();
+        console.log('[deleteMessage] 저장 완료');
         
         // 메시지가 모두 삭제되면 환영 메시지 표시
         const remainingMessages = this.elements.chatMessages.querySelectorAll('.message-wrapper');
@@ -5436,6 +7345,22 @@ class ChatManager {
      */
     async regenerateMessage(messageWrapper) {
         if (!messageWrapper || !messageWrapper.parentNode) return;
+        
+        // 중요: currentChatId를 저장하여 리롤 후에도 유지
+        // 리롤 후 저장 시 새 채팅이 생성되는 것을 방지
+        // currentChatId가 characterId와 같으면 잘못된 값이므로 null로 처리
+        const savedCurrentChatId = (this.currentChatId && this.currentChatId !== this.currentCharacterId && this.currentChatId.includes('_')) 
+            ? this.currentChatId 
+            : null;
+        const savedCurrentChatName = this.currentChatName;
+        
+        // 메시지 삭제 플래그 설정 (그리팅 추가 방지용)
+        // 재생성 시작 시점에 플래그를 설정하여, 삭제 후 새 메시지 생성 시 그리팅이 추가되지 않도록 함
+        this._messageDeletedRecently = true;
+        // 5초 후 플래그 해제 (타임아웃으로 자동 해제)
+        setTimeout(() => {
+            this._messageDeletedRecently = false;
+        }, 5000);
         
         // 생성 중이면 중단
         if (this.isGenerating) {
@@ -5492,28 +7417,96 @@ class ChatManager {
         }
         
         // DOM에서 메시지 제거
+        const deletedUuidSet = new Set(deletedUuids);
         for (const wrapper of messagesToDelete) {
             wrapper.remove();
         }
         
-        // DOM 업데이트 완료 대기 (여러 번 호출하여 확실히 반영)
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        // DOM 업데이트 완료 대기: 삭제된 메시지가 실제로 DOM에서 사라졌는지 확인
+        // remove()는 동기적으로 실행되지만, 브라우저가 DOM을 업데이트하는 데 시간이 걸릴 수 있음
+        let domUpdateComplete = false;
+        let retryCount = 0;
+        const maxRetries = 10;
+        
+        while (!domUpdateComplete && retryCount < maxRetries) {
+            // DOM에서 삭제된 메시지가 실제로 사라졌는지 확인
+            const remainingMessages = Array.from(this.elements.chatMessages.querySelectorAll('.message-wrapper'));
+            const stillExists = remainingMessages.some(wrapper => {
+                const messageUuid = wrapper.dataset.messageUuid;
+                return messageUuid && deletedUuidSet.has(messageUuid);
+            });
+            
+            if (!stillExists) {
+                domUpdateComplete = true;
+                break;
+            }
+            
+            // DOM 업데이트 대기
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            retryCount++;
+        }
+        
+        // 추가 안전장치: DOM 강제 리플로우
+        this.elements.chatMessages.offsetHeight;
         
         // 입력창 초기화 (재생성 시에는 메시지 추가 안 함)
+        // 플래그는 함수 시작 부분에서 이미 설정됨
         this.elements.messageInput.value = '';
         this.elements.messageInput.style.height = '44px';
         this.elements.messageInput.offsetHeight;
         
-        // DOM 업데이트를 더 확실하게 보장 (추가 대기)
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-        
         // 중요: 재생성 시 메시지 삭제 후 즉시 저장하여 새로고침 시에도 삭제 상태가 유지되도록 함
         // (생성 완료 후에도 다시 저장하지만, 중간에 새로고침해도 삭제된 상태는 유지되어야 함)
+        // 삭제된 메시지 UUID를 임시로 저장 (saveChat에서 사용)
+        // currentChatId를 복원하여 새 채팅이 생성되지 않도록 함
+        this._deletedMessageUuids = new Set(deletedUuids);
+        console.log('[regenerateMessage] 메시지 삭제 후 저장 시작 (saveChat 호출):', {
+            deletedUuids: deletedUuids.length,
+            deletedUuidsSet: this._deletedMessageUuids.size,
+            savedCurrentChatId: savedCurrentChatId?.substring(0, 30) || 'null',
+            currentChatId: this.currentChatId?.substring(0, 30) || 'null'
+        });
+        // currentChatId 복원 (리롤 후에도 기존 채팅 유지)
+        if (!this.currentChatId && savedCurrentChatId) {
+            this.currentChatId = savedCurrentChatId;
+            this.currentChatName = savedCurrentChatName;
+            console.log('[regenerateMessage] currentChatId 복원:', {
+                chatId: savedCurrentChatId.substring(0, 30)
+            });
+        }
         await this.saveChat();
+        // 저장 완료 후 삭제된 UUID 추적 해제 (다음 저장 시에는 영향 없도록)
+        this._deletedMessageUuids.clear();
+        console.log('[regenerateMessage] 메시지 삭제 후 저장 완료');
         
         // 재생성 시작: 삭제 후 남은 마지막 메시지를 확인 (DOM에서 직접 읽기)
         // 주의: getChatHistory()는 DOM에서 읽으므로 삭제된 메시지는 제외됨
-        // 하지만 DOM 업데이트가 완전히 반영되도록 여러 번 대기 후 호출
+        // DOM 업데이트가 완전히 반영되었는지 다시 한 번 확인
+        // 삭제된 메시지가 DOM에 남아있는지 최종 확인
+        let finalCheckComplete = false;
+        let finalRetryCount = 0;
+        const finalMaxRetries = 5;
+        
+        while (!finalCheckComplete && finalRetryCount < finalMaxRetries) {
+            const remainingMessages = Array.from(this.elements.chatMessages.querySelectorAll('.message-wrapper'));
+            const stillExists = remainingMessages.some(wrapper => {
+                const messageUuid = wrapper.dataset.messageUuid;
+                return messageUuid && deletedUuidSet.has(messageUuid);
+            });
+            
+            if (!stillExists) {
+                finalCheckComplete = true;
+                break;
+            }
+            
+            // DOM 업데이트 대기
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            finalRetryCount++;
+        }
+        
+        // DOM 강제 리플로우 (최종 확인)
+        this.elements.chatMessages.offsetHeight;
+        
         const chatHistory = this.getChatHistory();
         const lastMessage = chatHistory.length > 0 ? chatHistory[chatHistory.length - 1] : null;
         
@@ -5559,12 +7552,17 @@ class ChatManager {
             // 주의: generateAIResponse의 finally에서도 상태 해제를 하지만, 여기서도 확실히 해제
             // 상태가 아직 해제되지 않았다면 강제로 해제
             if (this.isGenerating || this.abortController) {
-                await this.showAILoader(false);
+                // UI 상태 업데이트를 먼저 실행 (동기적으로 즉시 반영)
                 this.abortController = null;
                 this.isGenerating = false;
                 this.updateSendButtonIcon('play');
                 this.updateAutofillButtonState();
                 this.updateSendButtonState();
+                
+                // AI 로더 숨김 (비동기로 실행)
+                this.showAILoader(false, false).catch((error) => {
+                    console.debug('[regenerateMessage] showAILoader 중 오류 (무시):', error);
+                });
             }
         }
     }
@@ -5997,6 +7995,15 @@ class ChatManager {
             case 'select':
                 // 실리태번과 동일: 채팅 로드 및 표시
                 await this.loadChat(id);
+                
+                // ⚠️ 중요: loadChat 후에 this.currentCharacterId 설정
+                // loadChat에서는 this.currentCharacterId를 설정하지 않으므로 여기서 설정
+                // 채팅 데이터에서 characterId 가져오기
+                const selectedChatData = await ChatStorage.load(id);
+                if (selectedChatData && selectedChatData.characterId) {
+                    this.currentCharacterId = selectedChatData.characterId;
+                }
+                
                 // 패널 닫기 (외부에서 호출 시)
                 const panelContainer = document.getElementById('panel-modal-container');
                 if (panelContainer) {
@@ -6160,6 +8167,10 @@ class ChatManager {
                                     if (characterChats.length > 0) {
                                         const mostRecentChat = characterChats[0];
                                         await this.loadChat(mostRecentChat.chatId, mostRecentChat.messageCount === 0);
+                                        
+                                        // ⚠️ 중요: loadChat 후에 this.currentCharacterId 설정
+                                        // loadChat에서는 this.currentCharacterId를 설정하지 않으므로 여기서 설정
+                                        this.currentCharacterId = currentCharId;
                                         
                                         // 캐릭터의 현재 채팅 정보 업데이트
                                         character.chat = mostRecentChat.chatData.chatName;

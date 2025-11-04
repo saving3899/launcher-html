@@ -210,13 +210,13 @@ async function clearIndexedDB(storeName) {
 
 function openIndexedDB() {
     return new Promise((resolve, reject) => {
-        // 버전을 3으로 올림 (ai_loading_presets object store 추가)
-        const request = indexedDB.open('mobile_chat_app_db', 3);
+        // 버전을 4로 올림 (user_sounds object store 추가)
+        const request = indexedDB.open('mobile_chat_app_db', 4);
         request.onerror = () => reject(request.error);
         request.onsuccess = () => resolve(request.result);
         request.onupgradeneeded = (event) => {
             const db = event.target.result;
-            const stores = ['settings', 'characters', 'chats', 'world_info', 'quick_reply', 'user_personas', 'regex_scripts', 'presets', 'ai_loading_presets'];
+            const stores = ['settings', 'characters', 'chats', 'world_info', 'quick_reply', 'user_personas', 'regex_scripts', 'presets', 'ai_loading_presets', 'user_sounds'];
             stores.forEach(storeName => {
                 if (!db.objectStoreNames.contains(storeName)) {
                     db.createObjectStore(storeName);
@@ -293,6 +293,12 @@ class SettingsStorage {
                 // Custom API 설정
                 custom_url: '',
                 custom_model_id: '',
+                // 효과음 설정
+                play_message_sound: false,
+                play_sound_unfocused: true,
+                current_sound_id: 'default', // 현재 선택된 효과음 ID ('default' 또는 유저 업로드 효과음 UUID)
+                // 메시지 전송 키보드 단축키 설정
+                message_send_key: 'enter', // 'enter' 또는 'ctrl_enter'
             };
             return await loadFromIndexedDB('settings', 'settings', defaultSettings);
         }
@@ -434,6 +440,11 @@ class CharacterStorage {
     }
 
     static async saveCurrent(characterId) {
+        // ⚠️ 디버깅: 캐릭터 저장 시 호출 스택 확인
+        console.log('[CharacterStorage.saveCurrent] 호출됨:', {
+            characterId: characterId,
+            stackTrace: new Error().stack
+        });
         const settings = await SettingsStorage.load();
         settings.currentCharacterId = characterId;
         return await SettingsStorage.save(settings);
@@ -750,6 +761,43 @@ class PresetStorage {
         allData.preset_names = newPresetNames;
         
         return await this.saveAll(apiId, allData.presets, allData.preset_names);
+    }
+}
+
+/**
+ * 유저 업로드 효과음 데이터 관리
+ */
+class UserSoundStorage {
+    static async saveAll(sounds) {
+        return await saveAllToIndexedDB('user_sounds', sounds);
+    }
+
+    static async loadAll() {
+        return await loadAllFromIndexedDB('user_sounds');
+    }
+
+    static async save(soundId, soundData) {
+        const sounds = await this.loadAll();
+        sounds[soundId] = {
+            ...soundData,
+            id: soundId,
+            uploaded_at: sounds[soundId]?.uploaded_at || Date.now(),
+            updated_at: Date.now()
+        };
+        return await this.saveAll(sounds);
+    }
+
+    static async load(soundId) {
+        const sounds = await this.loadAll();
+        return sounds[soundId] || null;
+    }
+
+    static async delete(soundId) {
+        return await deleteFromIndexedDB('user_sounds', soundId);
+    }
+
+    static async clearAll() {
+        return await clearIndexedDB('user_sounds');
     }
 }
 

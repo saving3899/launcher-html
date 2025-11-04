@@ -41,15 +41,15 @@ class SettingsManager {
             if (!chatCompletionSourceSelect._hasChangeHandler) {
                 chatCompletionSourceSelect._hasChangeHandler = true;
                 chatCompletionSourceSelect.addEventListener('change', async () => {
-                    this.toggleProviderSpecificSettings();
-                    this.updateModelOptions();
+                this.toggleProviderSpecificSettings();
+                this.updateModelOptions();
                     // API 변경 시 설정 저장 (새로고침 후에도 유지되도록)
                     await this.saveSettings();
                     // 프롬프트 패널이 열려있으면 업데이트하도록 이벤트 발송
                     window.dispatchEvent(new CustomEvent('api-provider-changed', { 
                         detail: { apiProvider: chatCompletionSourceSelect.value } 
                     }));
-                });
+            });
             }
         }
 
@@ -760,7 +760,7 @@ class SettingsManager {
         
         // IndexedDB에 설정 저장
         try {
-            await SettingsStorage.save(settings);
+        await SettingsStorage.save(settings);
             console.log('[SettingsManager.saveSettings] 저장 완료, apiProvider:', provider);
             
             // 저장 확인을 위한 재로드 및 검증

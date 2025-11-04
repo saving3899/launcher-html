@@ -233,13 +233,15 @@ async function prepareOpenAIMessages({
         }, promptManager, oaiSettings);
 
         // Fill the chat completion with as much context as the budget allows
+        // ⚠️ 중요: name2(캐릭터 이름)를 전달하여 populateChatHistory에서 올바른 캐릭터의 정규식 적용
         await populateChatCompletion(
             prompts, 
             chatCompletion, 
             { bias, quietPrompt, quietImage, type, cyclePrompt, messages, messageExamples, excludeStatusBarChoice },
             promptManager,
             tokenCountFn,
-            oaiSettings // oaiSettings를 전달하여 new_chat_prompt 등 사용
+            oaiSettings, // oaiSettings를 전달하여 new_chat_prompt 등 사용
+            name2 // 캐릭터 이름 전달 (정규식 적용 시 올바른 캐릭터 사용)
         );
 
         // TODO: 에러 처리 (TokenBudgetExceededError, InvalidCharacterNameError 등)

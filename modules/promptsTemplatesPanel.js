@@ -2372,10 +2372,10 @@ async function setupPromptsPanelEvents(panelContainer) {
         
         // 필드 업데이트
         if (panelContainer) {
-            updateSourceFields(panelContainer, apiProvider);
-            
+    updateSourceFields(panelContainer, apiProvider);
+    
             // 컨텍스트 크기 업데이트도 함께 수행
-            await handleModelChange(panelContainer, apiProvider);
+    await handleModelChange(panelContainer, apiProvider);
         } else {
             console.warn('[promptsTemplatesPanel.handleApiProviderChange] panelContainer가 null입니다.');
         }
@@ -2823,9 +2823,23 @@ async function setupPromptsPanelEvents(panelContainer) {
             // 단, 모달이 열릴 때만 토큰 계산 수행
             const originalTryGenerate = promptManager.tryGenerate;
             promptManager.tryGenerate = async () => {
+                // ⚠️ 중요: 캐릭터 ID는 chatManager.currentCharacterId만 사용
+                // CharacterStorage.loadCurrent()는 사용하지 않음 (잘못된 캐릭터로 연결되는 문제 방지)
+                // 이유: 프롬프트 모달을 열었다 닫으면 다른 캐릭터로 연결되는 문제 방지
+                
+                // ChatManager에서 현재 캐릭터 ID 가져오기 (유일한 소스)
+                let currentCharacterId = null;
+                try {
+                    if (typeof window !== 'undefined' && window.chatManager) {
+                        currentCharacterId = window.chatManager.currentCharacterId;
+                    }
+                } catch (e) {
+                    // chatManager에 접근할 수 없으면 무시
+                }
+                
+                // ⚠️ 중요: CharacterStorage.loadCurrent()를 사용하지 않음
+                // chatManager.currentCharacterId가 없으면 건너뛰기
                 // 캐릭터가 선택되어 있지 않으면 건너뛰기
-                // CharacterStorage - 전역 스코프에서 사용
-                const currentCharacterId = await CharacterStorage.loadCurrent();
                 if (!currentCharacterId) {
                     return;
                 }
@@ -3003,24 +3017,24 @@ async function setupPromptsPanelEvents(panelContainer) {
                 jailbreakQuickEdit.value = jailbreakPrompt.content || '';
             }
         }
-        
+    
     // 설정 모달의 chat-completion-source select 변경 감지
     const chatCompletionSourceSelect = document.getElementById('chat-completion-source');
     if (chatCompletionSourceSelect) {
         // 중복 등록 방지
         if (!chatCompletionSourceSelect._hasPromptsChangeHandler) {
             chatCompletionSourceSelect._hasPromptsChangeHandler = true;
-            chatCompletionSourceSelect.addEventListener('change', async () => {
+        chatCompletionSourceSelect.addEventListener('change', async () => {
                 // SettingsManager의 change 핸들러가 saveSettings를 호출하므로
                 // 여기서는 저장 후 바로 업데이트
                 // 짧은 지연을 주어 SettingsManager의 saveSettings가 완료되도록 함
                 await new Promise(resolve => setTimeout(resolve, 50));
-                await handleApiProviderChange();
-                // API 변경 시 모델도 다시 확인
-                const newSettings = await SettingsStorage.load();
-                const newApiProvider = newSettings.apiProvider || 'openai';
-                await handleModelChange(panelContainer, newApiProvider);
-            });
+            await handleApiProviderChange();
+            // API 변경 시 모델도 다시 확인
+            const newSettings = await SettingsStorage.load();
+            const newApiProvider = newSettings.apiProvider || 'openai';
+            await handleModelChange(panelContainer, newApiProvider);
+        });
         }
     }
     

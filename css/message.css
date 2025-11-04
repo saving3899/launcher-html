@@ -91,6 +91,55 @@
     align-items: flex-end;
 }
 
+.message-name-reasoning-container{
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.message-name-reasoning-container .message-reasoning-button{
+    display: none; /* 기본적으로 숨김, 추론 내용이 있으면 JavaScript에서 inline-block으로 변경 */
+    background: none;
+    border: none;
+    padding: 4px;
+    cursor: pointer;
+    opacity: 0.4;
+    transition: opacity 0.2s ease;
+    font-size: 0.9em;
+    color: inherit;
+    vertical-align: middle;
+}
+
+.message-name-reasoning-container .message-reasoning-button:hover{
+    opacity: 1;
+}
+
+.message-name-reasoning-container .message-reasoning-button.active{
+    opacity: 1;
+}
+
+/* 추론 내용 */
+.message-reasoning-content{
+    display: none; /* 기본적으로 숨김, JavaScript에서 제어 */
+    padding: var(--spacing-lg) var(--spacing-xl);
+    margin-bottom: 8px;
+    border-radius: var(--border-radius-lg);
+    color: #808080;
+    font-size: 0.9em;
+    line-height: 1.5;
+    border: 1px dashed #ddd;
+}
+
+.message-reasoning-content p:not(:last-child){
+    margin-bottom: 15px;
+}
+
+/* 추론 텍스트 - 줄바꿈 유지, 일반 텍스트 표시 */
+.message-reasoning-text {
+    white-space: pre-line;
+    word-wrap: break-word;
+}
+
 /* 메시지 이름 */
 .message-name {
     font-size: 14px;

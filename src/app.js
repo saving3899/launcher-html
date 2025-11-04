@@ -99,8 +99,33 @@ class MobileChatApp {
                     return;
                 }
                 
-                // 새 채팅 생성 전에 현재 채팅 저장 (덮어쓰기 방지)
-                if (this.chatManager.currentChatId && this.chatManager.elements?.chatMessages?.children?.length > 0) {
+                // 현재 채팅이 있는지 확인 (메시지 개수와 관계없이 currentChatId만 확인)
+                const hasCurrentChat = !!this.chatManager.currentChatId;
+                
+                // 새 채팅 시작 확인 다이얼로그 표시
+                const result = await showNewChatConfirmModal(hasCurrentChat);
+                if (!result.confirmed) {
+                    return; // 취소됨
+                }
+                
+                // 현재 채팅 삭제 옵션이 체크되어 있으면 삭제
+                if (result.deleteCurrentChat && this.chatManager.currentChatId) {
+                    try {
+                        await ChatStorage.delete(this.chatManager.currentChatId);
+                        // 채팅 목록 패널이 열려있으면 새로고침
+                        if (window.panelManager) {
+                            window.panelManager.refreshChatListPanel(currentCharId).catch(error => {
+                                console.debug('[MobileChatApp] 채팅 목록 패널 새로고침 오류:', error);
+                            });
+                        }
+                    } catch (error) {
+                        // 오류 코드 토스트 알림 표시
+                        if (typeof showErrorCodeToast === 'function') {
+                            showErrorCodeToast('ERR_INIT_1003', '현재 채팅 삭제 중 오류가 발생했습니다', error);
+                        }
+                    }
+                } else if (hasCurrentChat) {
+                    // 현재 채팅 삭제하지 않으면 저장 (덮어쓰기 방지)
                     try {
                         await this.chatManager.saveChat();
                     } catch (error) {
@@ -190,8 +215,33 @@ class MobileChatApp {
                     return;
                 }
                 
-                // 새 채팅 생성 전에 현재 채팅 저장 (덮어쓰기 방지)
-                if (this.chatManager.currentChatId && this.chatManager.elements?.chatMessages?.children?.length > 0) {
+                // 현재 채팅이 있는지 확인 (메시지 개수와 관계없이 currentChatId만 확인)
+                const hasCurrentChat = !!this.chatManager.currentChatId;
+                
+                // 새 채팅 시작 확인 다이얼로그 표시
+                const result = await showNewChatConfirmModal(hasCurrentChat);
+                if (!result.confirmed) {
+                    return; // 취소됨
+                }
+                
+                // 현재 채팅 삭제 옵션이 체크되어 있으면 삭제
+                if (result.deleteCurrentChat && this.chatManager.currentChatId) {
+                    try {
+                        await ChatStorage.delete(this.chatManager.currentChatId);
+                        // 채팅 목록 패널이 열려있으면 새로고침
+                        if (window.panelManager) {
+                            window.panelManager.refreshChatListPanel(currentCharId).catch(error => {
+                                console.debug('[MobileChatApp] 채팅 목록 패널 새로고침 오류:', error);
+                            });
+                        }
+                    } catch (error) {
+                        // 오류 코드 토스트 알림 표시
+                        if (typeof showErrorCodeToast === 'function') {
+                            showErrorCodeToast('ERR_INIT_1003', '현재 채팅 삭제 중 오류가 발생했습니다', error);
+                        }
+                    }
+                } else if (hasCurrentChat) {
+                    // 현재 채팅 삭제하지 않으면 저장 (덮어쓰기 방지)
                     try {
                         await this.chatManager.saveChat();
                     } catch (error) {
@@ -262,46 +312,8 @@ class MobileChatApp {
             });
         }
 
-        // 텍스트 입력창 자동 높이 조절
-        const messageInput = this.elements.messageInput;
-        if (messageInput) {
-            // 초기 높이 설정
-            messageInput.style.height = '44px';
-            
-            const adjustHeight = function() {
-                // 빈 내용이면 44px로 고정
-                const value = this.value || '';
-                if (value.trim() === '') {
-                    this.style.height = '44px';
-                    return;
-                }
-                
-                // overflow를 hidden으로 변경하여 정확한 scrollHeight 측정
-                const originalOverflow = this.style.overflow;
-                this.style.overflow = 'hidden';
-                this.style.height = 'auto';
-                
-                // 줄바꿈이 없는 한 줄인지 확인
-                const hasNewline = value.includes('\n');
-                let scrollHeight = this.scrollHeight;
-                
-                // 한 줄이고 scrollHeight가 44px보다 크면 44px로 조정
-                if (!hasNewline && scrollHeight > 44) {
-                    scrollHeight = 44;
-                }
-                
-                this.style.overflow = originalOverflow || '';
-                
-                const minHeight = 44;
-                const maxHeight = window.innerHeight * 0.4; // 40vh
-                const newHeight = Math.max(minHeight, Math.min(scrollHeight, maxHeight));
-                this.style.height = newHeight + 'px';
-            };
-            
-            messageInput.addEventListener('input', adjustHeight);
-            // 포커스를 잃었을 때도 높이 재조정
-            messageInput.addEventListener('blur', adjustHeight);
-        }
+        // 텍스트 입력창 자동 높이 조절 설정
+        this.setupMessageInputHeightAdjust();
         
         // 초기화 시 플래그는 false로 유지 (UI에 "캐릭터 선택"이 표시되어 있으므로)
         // checkStoredCharacter()는 호출하지 않음 - UI 상태가 진실의 원천
@@ -311,6 +323,77 @@ class MobileChatApp {
         
         // setupIframeMessageListener는 initializeModules() 직후에 호출되도록 이미 이동됨
         // (chatManager와 characterManager가 초기화된 후에 리스너를 등록해야 함)
+    }
+    
+    /**
+     * 메시지 입력창 높이 자동 조절 설정
+     */
+    setupMessageInputHeightAdjust() {
+        const messageInput = this.elements.messageInput;
+        if (!messageInput) return;
+        
+        // CSS 스타일 설정
+        messageInput.style.resize = 'none';
+        messageInput.style.overflow = 'hidden';
+        messageInput.style.minHeight = '44px';
+        messageInput.style.maxHeight = '40vh';
+        
+        const adjustHeight = () => {
+            const value = messageInput.value || '';
+            
+            // 빈 내용이면 최소 높이로 고정
+            if (value.trim() === '') {
+                messageInput.style.height = '44px';
+                messageInput.style.overflowY = 'hidden';
+                return;
+            }
+            
+            // 줄바꿈이 없는 한 줄인지 확인
+            const hasNewline = value.includes('\n');
+            
+            // 최소/최대 높이
+            const minHeight = 44;
+            const maxHeight = window.innerHeight * 0.4; // 40vh
+            
+            // 한 줄이면 무조건 최소 높이로 고정 (여백 방지)
+            if (!hasNewline) {
+                messageInput.style.height = `${minHeight}px`;
+                messageInput.style.overflowY = 'hidden';
+                return;
+            }
+            
+            // 여러 줄인 경우에만 scrollHeight 측정
+            // 높이를 auto로 설정하여 scrollHeight 정확히 측정
+            messageInput.style.height = 'auto';
+            
+            // scrollHeight 측정
+            const scrollHeight = messageInput.scrollHeight;
+            
+            // 최소/최대 높이 적용
+            const newHeight = Math.max(minHeight, Math.min(scrollHeight, maxHeight));
+            
+            // 높이 설정
+            messageInput.style.height = `${newHeight}px`;
+            
+            // 최대 높이에 도달하면 스크롤 가능하도록
+            if (scrollHeight > maxHeight) {
+                messageInput.style.overflowY = 'auto';
+            } else {
+                messageInput.style.overflowY = 'hidden';
+            }
+        };
+        
+        // 초기 높이 설정
+        adjustHeight();
+        
+        // 높이 조절 함수를 전역으로 저장 (chatManager에서도 사용)
+        if (typeof window !== 'undefined') {
+            window.messageInputHeightAdjust = adjustHeight;
+        }
+        
+        messageInput.addEventListener('input', adjustHeight);
+        // 포커스를 잃었을 때도 높이 재조정
+        messageInput.addEventListener('blur', adjustHeight);
     }
     
     /**
@@ -730,6 +813,9 @@ class MobileChatApp {
             case 'data-management':
                 this.openDataManagementPanel();
                 break;
+            case 'other-settings':
+                this.openOtherSettingsPanel();
+                break;
             case 'world-info':
                 this.openWorldInfoPanel();
                 break;
@@ -803,6 +889,14 @@ class MobileChatApp {
     async openDataManagementPanel() {
         const panelHtml = await createDataManagementPanel();
         this.panelManager.openPanelModal(panelHtml, 'data-management');
+    }
+
+    /**
+     * 기타 설정 패널 열기
+     */
+    async openOtherSettingsPanel() {
+        const panelHtml = await createOtherSettingsPanel();
+        this.panelManager.openPanelModal(panelHtml, 'other-settings');
     }
 
     /**

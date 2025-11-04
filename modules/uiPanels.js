@@ -941,6 +941,145 @@ async function createDataManagementPanel() {
 }
 
 /**
+ * 기타 설정 패널 UI 생성
+ * @returns {Promise<string>} HTML 문자열
+ */
+async function createOtherSettingsPanel() {
+    const settings = await SettingsStorage.load();
+    const playMessageSound = settings.play_message_sound ?? false;
+    const playSoundUnfocused = settings.play_sound_unfocused ?? true;
+    const currentSoundId = settings.current_sound_id || 'default';
+    const messageSendKey = settings.message_send_key || 'enter';
+    
+    // 기본 효과음 파일 목록 (파일명 기준 정렬)
+    const defaultSoundFiles = [
+        'message.mp3',
+        'Blop.mp3',
+        'Coin.mp3',
+        'Correct.mp3',
+        'Glow.mp3',
+        'Pop.mp3',
+        'Stapler.mp3',
+        'Tiny Button.mp3'
+    ].sort((a, b) => {
+        // message.mp3는 항상 첫 번째로 유지
+        if (a === 'message.mp3') return -1;
+        if (b === 'message.mp3') return 1;
+        // 나머지는 파일명 기준 정렬
+        return a.localeCompare(b);
+    });
+    
+    // 유저 업로드 효과음 목록 가져오기
+    const userSounds = await UserSoundStorage.loadAll();
+    const userSoundList = Object.values(userSounds || {}).sort((a, b) => {
+        // 업로드 시간순 정렬 (과거순 - 최신이 가장 아래)
+        return (a.uploaded_at || 0) - (b.uploaded_at || 0);
+    });
+    
+    // 셀렉트 옵션 생성
+    let soundSelectOptions = '';
+    
+    // 기본 효과음 옵션 추가
+    defaultSoundFiles.forEach((filename, index) => {
+        const soundId = `sound_${index}`;
+        const displayName = `기본 효과음 ${index + 1}`;
+        const isSelected = currentSoundId === soundId || (index === 0 && currentSoundId === 'default');
+        soundSelectOptions += `<option value="${escapeHtml(soundId)}" ${isSelected ? 'selected' : ''}>${escapeHtml(displayName)}</option>`;
+    });
+    
+    // 유저 업로드 효과음 옵션 추가
+    userSoundList.forEach(sound => {
+        soundSelectOptions += `<option value="${escapeHtml(sound.id)}" ${currentSoundId === sound.id ? 'selected' : ''}>${escapeHtml(sound.name || '사용자 효과음')}</option>`;
+    });
+    
+    // 현재 선택된 효과음이 유저 업로드인지 확인
+    const isUserSound = currentSoundId !== 'default' && !currentSoundId.startsWith('sound_') && userSounds[currentSoundId];
+    
+    return `
+        <div class="modal-content panel-modal">
+            <div class="modal-header">
+                <h2>기타 설정</h2>
+                <button class="icon-btn close-panel-btn">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="modal-body panel-body">
+                <div class="panel-section">
+                    <h3 class="panel-section-title">효과음 설정</h3>
+                    
+                    <div class="panel-setting-row">
+                        <label class="checkbox_label" for="play-message-sound">
+                            <input type="checkbox" id="play-message-sound" ${playMessageSound ? 'checked' : ''}>
+                            <span>메시지 생성 완료 시 효과음 재생</span>
+                        </label>
+                        <span class="panel-setting-hint">AI 응답이 완료될 때 효과음을 재생합니다.</span>
+                    </div>
+                    
+                    <div class="panel-setting-row">
+                        <label class="checkbox_label" for="play-sound-unfocused">
+                            <input type="checkbox" id="play-sound-unfocused" ${playSoundUnfocused ? 'checked' : ''}>
+                            <span>탭이 포커스되지 않았을 때만 재생</span>
+                        </label>
+                        <span class="panel-setting-hint">브라우저 탭이 포커스되지 않았을 때만 효과음을 재생합니다.</span>
+                    </div>
+                    
+                    <div class="panel-setting-row">
+                        <label class="panel-setting-label" for="sound-select">
+                            효과음 선택
+                            <span class="panel-setting-hint">사용할 효과음을 선택합니다. 기본 효과음 또는 업로드한 효과음을 선택할 수 있습니다.</span>
+                        </label>
+                        <div style="display: flex; gap: var(--spacing-sm); align-items: center; flex-wrap: wrap;">
+                            <select id="sound-select" class="panel-setting-input" style="flex: 1; min-width: 200px;">
+                                ${soundSelectOptions}
+                            </select>
+                            <button type="button" id="sound-delete-btn" class="panel-action-btn danger" style="flex-shrink: 0; display: ${isUserSound ? 'inline-flex' : 'none'};">
+                                <i class="fa-solid fa-trash"></i> 삭제
+                            </button>
+                            <button type="button" id="sound-upload-btn" class="panel-action-btn" style="flex-shrink: 0;">
+                                <i class="fa-solid fa-upload"></i> 업로드
+                            </button>
+                            <button type="button" id="sound-test-btn" class="panel-action-btn" style="flex-shrink: 0;">
+                                <i class="fa-solid fa-volume-high"></i> 테스트
+                            </button>
+                        </div>
+                        <input 
+                            type="file" 
+                            id="sound-file-input" 
+                            accept=".mp3,.wav,.ogg,.m4a"
+                            style="display: none;"
+                        >
+                        <audio id="audio_message_sound" src="public/sounds/message.mp3" hidden></audio>
+                    </div>
+                </div>
+                
+                <div class="panel-section">
+                    <h3 class="panel-section-title">메시지 전송 설정</h3>
+                    
+                    <div class="panel-setting-row">
+                        <label class="panel-setting-label" for="message-send-key">
+                            메시지 전송 키
+                        </label>
+                        <div style="display: flex; gap: var(--spacing-md); align-items: center; flex-wrap: wrap;">
+                            <label style="display: flex; align-items: center; gap: var(--spacing-sm); cursor: pointer;">
+                                <input type="radio" name="message-send-key" value="enter" ${messageSendKey === 'enter' ? 'checked' : ''} style="margin: 0;">
+                                <span>Enter 입력</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: var(--spacing-sm); cursor: pointer;">
+                                <input type="radio" name="message-send-key" value="ctrl_enter" ${messageSendKey === 'ctrl_enter' ? 'checked' : ''} style="margin: 0;">
+                                <span>Ctrl+Enter 입력</span>
+                            </label>
+                        </div>
+                        <span class="panel-setting-hint" style="margin-top: var(--spacing-xs);">
+                            ${messageSendKey === 'enter' ? 'Enter 키로 메시지를 전송하고, Shift+Enter로 줄바꿈합니다.' : 'Ctrl+Enter 키로 메시지를 전송하고, Enter로 줄바꿈합니다.'}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
  * HTML 이스케이프
  * @param {string} text - 이스케이프할 텍스트
  * @returns {string} 이스케이프된 텍스트

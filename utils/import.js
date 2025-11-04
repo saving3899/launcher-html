@@ -246,6 +246,21 @@ async function findCharacterByName(characterName) {
 /**
  * 채팅 데이터 불러오기
  * JSONL 형식 지원 (실리태번 호환)
+ * 
+ * ⚠️ 중요: 이 함수는 chatManager.js의 다음 기능들과 강하게 연동되어 있습니다.
+ * 
+ * [연동 기능]
+ * 1. loadOrCreateChat: 불러온 채팅이 가장 최근 채팅이 되도록 imported_date를 lastMessageDate로 설정
+ * 2. loadChat: 불러온 채팅 로드 후 character.chat 업데이트 필수 (홈화면 나갔다가 다시 들어올 때 자동 로드)
+ * 3. saveChat: 불러온 채팅은 DOM 메시지와 저장소 메시지 병합 시 모든 메시지 보존
+ * 
+ * [수정 시 주의사항]
+ * - imported_date 설정 변경 시 → loadOrCreateChat의 정렬 로직 확인
+ *   * 불러온 채팅: lastMessageDate = imported_date (Date.now()로 설정)
+ * - chatId 생성 로직 변경 시 → loadOrCreateChat에서 채팅 찾기 로직 확인
+ * - character.chat 업데이트: fileManager.js에서 loadChat 호출 후 자동으로 업데이트됨
+ *   * loadChat에서 character.chat = this.currentChatName 업데이트 확인
+ * 
  * @param {File} file - JSONL 채팅 파일
  * @returns {Promise<object>} 불러온 채팅 데이터
  */

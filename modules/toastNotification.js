@@ -469,3 +469,390 @@ function showConfirmModal(message, title = '확인', options = {}) {
     });
 }
 
+/**
+ * 새 채팅 시작 확인 다이얼로그 모달 표시
+ * @param {boolean} hasCurrentChat - 현재 채팅이 있는지 여부
+ * @returns {Promise<{confirmed: boolean, deleteCurrentChat: boolean}>} 확인 결과
+ */
+function showNewChatConfirmModal(hasCurrentChat = false) {
+    return new Promise((resolve) => {
+        // 기존 모달이 있으면 먼저 제거
+        const existingModal = document.getElementById('new-chat-confirm-modal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+        const existingOverlay = document.getElementById('new-chat-confirm-modal-overlay');
+        if (existingOverlay) {
+            existingOverlay.remove();
+        }
+
+        // 오버레이 생성
+        const overlay = document.createElement('div');
+        overlay.className = 'overlay';
+        overlay.id = 'new-chat-confirm-modal-overlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            z-index: 9999;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            cursor: pointer;
+        `;
+
+        // 모달 컨테이너 생성
+        // .modal 클래스를 사용하지 않고 별도 클래스 사용 (CSS 기본 스타일 충돌 방지)
+        const modal = document.createElement('div');
+        modal.className = 'new-chat-confirm-modal';
+        modal.id = 'new-chat-confirm-modal';
+        // 초기 스타일 설정 (DOM에 추가되기 전에 완전히 설정)
+        modal.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.95);
+            z-index: 10000;
+            opacity: 0;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            pointer-events: none;
+            visibility: hidden;
+            margin: 0;
+            width: auto;
+            height: auto;
+            display: block;
+        `;
+
+        // 모달 컨텐츠 생성
+        const modalContent = document.createElement('div');
+        modalContent.className = 'modal-content';
+        // 모달 컨텐츠 기본 스타일 설정
+        modalContent.style.cssText = `
+            pointer-events: auto;
+            background: var(--bg-secondary);
+            border-radius: var(--border-radius-lg);
+            padding: 0;
+            max-width: 600px;
+            min-width: 400px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+        `;
+
+        // 모달 헤더 생성
+        const modalHeader = document.createElement('div');
+        modalHeader.className = 'modal-header';
+        const headerTitle = document.createElement('h2');
+        headerTitle.textContent = '새 채팅 시작';
+        modalHeader.appendChild(headerTitle);
+
+        // 모달 바디 생성
+        const modalBody = document.createElement('div');
+        modalBody.className = 'modal-body';
+        const messageParagraph = document.createElement('p');
+        messageParagraph.style.cssText = `
+            margin: 0 0 var(--spacing-md) 0;
+            color: var(--text-primary);
+            line-height: 1.6;
+            white-space: pre-line;
+        `;
+        messageParagraph.textContent = '새 채팅을 시작하시겠습니까?';
+        modalBody.appendChild(messageParagraph);
+
+        // 체크박스 컨테이너 생성 (현재 채팅이 있을 때만 표시)
+        let checkboxContainer = null;
+        let checkbox = null;
+        if (hasCurrentChat) {
+            checkboxContainer = document.createElement('div');
+            checkboxContainer.style.cssText = `
+                margin-top: var(--spacing-md);
+                padding: var(--spacing-md);
+                background: var(--bg-tertiary);
+                border-radius: var(--border-radius);
+                border: 1px solid var(--border-color);
+                display: flex;
+                align-items: center;
+                gap: var(--spacing-sm);
+                transition: all var(--transition-fast);
+            `;
+            checkboxContainer.addEventListener('mouseenter', () => {
+                checkboxContainer.style.background = 'var(--bg-secondary)';
+                checkboxContainer.style.borderColor = 'var(--accent-green)';
+            });
+            checkboxContainer.addEventListener('mouseleave', () => {
+                checkboxContainer.style.background = 'var(--bg-tertiary)';
+                checkboxContainer.style.borderColor = 'var(--border-color)';
+            });
+
+            // 체크박스 래퍼 생성 (커스텀 체크박스 스타일링용)
+            const checkboxWrapper = document.createElement('div');
+            checkboxWrapper.style.cssText = `
+                position: relative;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 20px;
+                height: 20px;
+                flex-shrink: 0;
+            `;
+
+            checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = 'delete-current-chat-checkbox';
+            checkbox.style.cssText = `
+                position: absolute;
+                opacity: 0;
+                cursor: pointer;
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                z-index: 1;
+            `;
+
+            // 커스텀 체크박스 표시용 div
+            const checkboxDisplay = document.createElement('div');
+            checkboxDisplay.style.cssText = `
+                width: 20px;
+                height: 20px;
+                border: 2px solid var(--border-color);
+                border-radius: 4px;
+                background: var(--bg-primary);
+                transition: all var(--transition-fast);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                position: relative;
+            `;
+
+            // 체크 아이콘 (체크되었을 때 표시)
+            const checkIcon = document.createElement('i');
+            checkIcon.className = 'fa-solid fa-check';
+            checkIcon.style.cssText = `
+                font-size: 12px;
+                color: white;
+                opacity: 0;
+                transition: opacity var(--transition-fast);
+                transform: scale(0.8);
+            `;
+            checkboxDisplay.appendChild(checkIcon);
+
+            // 체크박스 상태 변경 시 스타일 업데이트
+            const updateCheckboxStyle = () => {
+                if (checkbox.checked) {
+                    checkboxDisplay.style.background = 'var(--accent-green)';
+                    checkboxDisplay.style.borderColor = 'var(--accent-green)';
+                    checkIcon.style.opacity = '1';
+                    checkIcon.style.transform = 'scale(1)';
+                } else {
+                    checkboxDisplay.style.background = 'var(--bg-primary)';
+                    checkboxDisplay.style.borderColor = 'var(--border-color)';
+                    checkIcon.style.opacity = '0';
+                    checkIcon.style.transform = 'scale(0.8)';
+                }
+            };
+
+            checkbox.addEventListener('change', updateCheckboxStyle);
+            checkbox.addEventListener('focus', () => {
+                checkboxDisplay.style.boxShadow = '0 0 0 3px rgba(76, 175, 80, 0.2)';
+            });
+            checkbox.addEventListener('blur', () => {
+                checkboxDisplay.style.boxShadow = 'none';
+            });
+
+            // 호버 효과
+            checkbox.addEventListener('mouseenter', () => {
+                if (!checkbox.checked) {
+                    checkboxDisplay.style.borderColor = 'var(--accent-green)';
+                    checkboxDisplay.style.background = 'var(--bg-secondary)';
+                }
+            });
+            checkbox.addEventListener('mouseleave', () => {
+                if (!checkbox.checked) {
+                    checkboxDisplay.style.borderColor = 'var(--border-color)';
+                    checkboxDisplay.style.background = 'var(--bg-primary)';
+                }
+            });
+
+            checkboxWrapper.appendChild(checkbox);
+            checkboxWrapper.appendChild(checkboxDisplay);
+
+            const checkboxLabel = document.createElement('label');
+            checkboxLabel.htmlFor = 'delete-current-chat-checkbox';
+            checkboxLabel.style.cssText = `
+                cursor: pointer;
+                color: var(--text-primary);
+                font-size: var(--font-size-md);
+                user-select: none;
+                flex: 1;
+                display: flex;
+                align-items: center;
+                gap: var(--spacing-sm);
+            `;
+            checkboxLabel.textContent = '현재 채팅 삭제하기';
+
+            // 라벨 클릭 시에도 체크박스 토글
+            checkboxLabel.addEventListener('click', (e) => {
+                e.preventDefault();
+                checkbox.checked = !checkbox.checked;
+                checkbox.dispatchEvent(new Event('change'));
+            });
+
+            checkboxContainer.appendChild(checkboxWrapper);
+            checkboxContainer.appendChild(checkboxLabel);
+            modalBody.appendChild(checkboxContainer);
+        }
+
+        // 모달 푸터 생성
+        const modalFooter = document.createElement('div');
+        modalFooter.className = 'modal-footer';
+        modalFooter.style.cssText = `
+            display: flex;
+            gap: var(--spacing-md);
+            justify-content: flex-end;
+            padding: var(--spacing-lg);
+            border-top: 1px solid var(--border-color);
+            flex-shrink: 0;
+        `;
+
+        // 취소 버튼 생성
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = '취소';
+        cancelBtn.className = 'btn btn-secondary';
+        cancelBtn.style.cssText = `
+            padding: var(--spacing-md) var(--spacing-xl);
+            font-size: var(--font-size-md);
+            font-weight: 600;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            min-width: 80px;
+            white-space: nowrap;
+            flex-shrink: 0;
+        `;
+        cancelBtn.addEventListener('mouseenter', () => {
+            cancelBtn.style.background = 'var(--bg-secondary)';
+            cancelBtn.style.borderColor = 'var(--accent-green)';
+        });
+        cancelBtn.addEventListener('mouseleave', () => {
+            cancelBtn.style.background = 'var(--bg-tertiary)';
+            cancelBtn.style.borderColor = 'var(--border-color)';
+        });
+        cancelBtn.addEventListener('click', () => {
+            closeModal(false);
+        });
+
+        // 확인 버튼 생성
+        const confirmBtn = document.createElement('button');
+        confirmBtn.textContent = '시작';
+        confirmBtn.className = 'btn btn-primary';
+        confirmBtn.style.cssText = `
+            padding: var(--spacing-md) var(--spacing-xl);
+            font-size: var(--font-size-md);
+            font-weight: 600;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            border: none;
+            min-width: 80px;
+            white-space: nowrap;
+            flex-shrink: 0;
+            background: var(--accent-green);
+            color: white;
+        `;
+        confirmBtn.addEventListener('mouseenter', () => {
+            confirmBtn.style.background = 'var(--accent-green-dark, #388e3c)';
+        });
+        confirmBtn.addEventListener('mouseleave', () => {
+            confirmBtn.style.background = 'var(--accent-green)';
+        });
+        confirmBtn.addEventListener('click', () => {
+            const deleteCurrentChat = checkbox ? checkbox.checked : false;
+            closeModal(true, deleteCurrentChat);
+        });
+
+        modalFooter.appendChild(cancelBtn);
+        modalFooter.appendChild(confirmBtn);
+
+        modalContent.appendChild(modalHeader);
+        modalContent.appendChild(modalBody);
+        modalContent.appendChild(modalFooter);
+        modal.appendChild(modalContent);
+
+        // 모달 닫기 함수
+        const closeModal = (confirmed, deleteCurrentChat = false) => {
+            // 부드러운 닫힘 애니메이션
+            modal.style.opacity = '0';
+            modal.style.transform = 'translate(-50%, -50%) scale(0.95)';
+            modal.style.pointerEvents = 'none';
+            overlay.style.opacity = '0';
+            
+            // 애니메이션 완료 후 DOM에서 제거
+            setTimeout(() => {
+                modal.remove();
+                overlay.remove();
+                resolve({ confirmed, deleteCurrentChat });
+            }, 300); // transition 시간과 동일하게 설정
+        };
+
+        // 오버레이 클릭 시 취소 (모달 바깥 영역 클릭)
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                closeModal(false);
+            }
+        });
+        
+        // 모달 컨텐츠 클릭 시 이벤트 전파 방지 (모달 내부 클릭 시 닫히지 않도록)
+        modalContent.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+
+        // ESC 키로 취소
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                closeModal(false);
+                document.removeEventListener('keydown', handleEscape);
+            }
+        };
+        document.addEventListener('keydown', handleEscape);
+
+        // DOM에 추가
+        document.body.appendChild(overlay);
+        document.body.appendChild(modal);
+        
+        // 강제로 레이아웃 계산 (reflow) - DOM에 추가된 후
+        // 이렇게 하면 브라우저가 위치를 계산할 수 있음
+        const forceReflow = () => {
+            void modal.offsetHeight;
+            void overlay.offsetHeight;
+        };
+        
+        // setTimeout을 사용하여 DOM이 완전히 추가된 후 레이아웃 계산
+        setTimeout(() => {
+            forceReflow();
+            
+            // 부드러운 열림 애니메이션
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    // visibility를 먼저 visible로 설정 (레이아웃 계산 후)
+                    modal.style.visibility = 'visible';
+                    // 오버레이 페이드 인
+                    overlay.style.opacity = '1';
+                    // 모달 페이드 인 및 스케일
+                    modal.style.opacity = '1';
+                    modal.style.transform = 'translate(-50%, -50%) scale(1)';
+                    modal.style.pointerEvents = 'auto';
+                });
+            });
+        }, 0);
+    });
+}
+

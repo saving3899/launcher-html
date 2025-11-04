@@ -385,8 +385,27 @@ async function sendAIMessageForAutofill(userMessage, chatManager) {
 
     // 비스트리밍 응답 처리 (대필은 즉시 결과가 필요)
     let responseText = null;
+    let reasoning = null;
     try {
-        responseText = await chatManager.callAIWithoutStreaming(apiProvider, apiOptions);
+        const response = await chatManager.callAIWithoutStreaming(apiProvider, apiOptions);
+        
+        // response가 객체인지 문자열인지 확인
+        if (typeof response === 'object' && response !== null) {
+            responseText = response.text || response.content || '';
+            reasoning = response.reasoning || null;
+        } else {
+            responseText = response;
+        }
+        
+        // 대필 요청 시 추론 내용이 있으면 별도로 저장 (결과물에서는 제거됨)
+        // API 응답에서 원본 데이터 가져오기 (rawData가 있으면 사용)
+        if (typeof response === 'object' && response.rawData) {
+            // 원본 응답 데이터에서 추론 내용 재추출
+            reasoning = chatManager.extractReasoningFromData(response.rawData, apiProvider, {
+                chatCompletionSource: apiOptions.chatCompletionSource || apiOptions.chat_completion_source,
+                show_thoughts: apiOptions.show_thoughts || apiOptions.showThoughts
+            });
+        }
     } catch (error) {
         // 오류 코드 토스트 알림 표시
         if (typeof showErrorCodeToast === 'function') {
@@ -403,6 +422,17 @@ async function sendAIMessageForAutofill(userMessage, chatManager) {
         throw new Error('AI 응답이 비어있습니다.');
     }
 
+    // 대필 결과물에서는 추론 내용을 완전히 제거 (보이지 않게, 아예 삭제)
+    // 추론 내용이 responseText에 포함되어 있을 수 있으므로 제거
+    // 추론 내용이 있으면 로그 (나중에 필요하면 추가 처리)
+    if (reasoning && reasoning.trim()) {
+        console.debug('[Autofill] 추론 내용 추출됨 (대필 결과물에서는 제외):', {
+            reasoningLength: reasoning.length,
+            reasoningPreview: reasoning.substring(0, 100)
+        });
+    }
+
+    // 대필 결과물 반환 (추론 내용 제외)
     return responseText;
 }
 

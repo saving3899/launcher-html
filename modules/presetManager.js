@@ -193,6 +193,9 @@ class PresetManager {
             'auto_expand',
             'show_hidden',
             'max_additions',
+            // ⚠️ 중요: 프리셋에 저장하지 않을 필드 (캐릭터/채팅 관련)
+            'currentCharacterId',  // 프리셋은 캐릭터와 무관해야 함
+            'currentChatId',       // 프리셋은 채팅과 무관해야 함
         ];
 
         const filtered = { ...settings };
@@ -369,8 +372,8 @@ class PresetManager {
                 apiProvider: settings.apiProvider,
                 apiKeys: settings.apiKeys,
                 apiModels: settings.apiModels,
-                currentCharacterId: settings.currentCharacterId,
-                currentChatId: settings.currentChatId,
+                // ⚠️ 중요: currentCharacterId와 currentChatId는 프리셋에 포함하지 않음
+                // (프리셋은 캐릭터/채팅과 무관해야 함)
                 name: 'Default',
                 // prompts와 prompt_order는 명시적으로 undefined로 설정하여
                 // applyPresetSettings 오버라이드에서 기본 프롬프트를 사용하도록 함
@@ -399,7 +402,9 @@ class PresetManager {
                                 (preset.prompts === undefined && preset.prompt_order === undefined);
         
         // SettingsStorage에 preset 설정 저장 (프롬프트 포함)
-        const settingsToSave = { ...preset };
+        // ⚠️ 중요: currentCharacterId와 currentChatId는 프리셋에서 제거
+        const { currentCharacterId: _, currentChatId: __, ...presetWithoutCharacter } = preset;
+        const settingsToSave = presetWithoutCharacter;
         
         // SettingsStorage를 통해 현재 설정 업데이트
         // (이미 SettingsStorage.load()로 가져온 설정에 병합)

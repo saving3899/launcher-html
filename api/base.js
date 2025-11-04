@@ -128,7 +128,16 @@ async function parseStreamingResponse(response, apiSource, { onChunk, onDone, on
                                 if (signal?.aborted) {
                                     throw new DOMException('The operation was aborted.', 'AbortError');
                                 }
-                                onChunk(text);
+                                // text와 함께 원본 json 데이터도 전달 (추론 내용 추출용)
+                                onChunk(text, json);
+                            }
+                        } else {
+                            // 텍스트가 없어도 추론 내용이 있을 수 있으므로 json 전달
+                            if (onChunk) {
+                                if (signal?.aborted) {
+                                    throw new DOMException('The operation was aborted.', 'AbortError');
+                                }
+                                onChunk('', json);
                             }
                         }
                     } catch (e) {
@@ -165,17 +174,28 @@ async function parseStreamingResponse(response, apiSource, { onChunk, onDone, on
 function extractTextFromChunk(chunk, apiSource) {
     if (apiSource === 'openai') {
         // OpenAI 형식: { choices: [{ delta: { content: "..." } }] }
+        // 추론 내용(reasoning_content, reasoning)은 별도 필드이므로 content에서 제외됨
         if (chunk.choices?.[0]?.delta?.content) {
             return chunk.choices[0].delta.content;
         }
     } else if (apiSource === 'anthropic') {
         // Anthropic 형식: { type: 'content_block_delta', delta: { text: "..." } }
+        // thinking은 별도 이벤트로 오므로 text에는 포함되지 않음
+        // thinking 이벤트는 텍스트가 아니므로 null 반환
+        if (chunk.type === 'content_block_delta' && chunk.delta?.thinking) {
+            return null; // thinking은 추론으로 별도 처리, 텍스트 반환하지 않음
+        }
+        // text 델타는 텍스트로 반환
         if (chunk.type === 'content_block_delta' && chunk.delta?.text) {
             return chunk.delta.text;
         }
         // 또는: { type: 'content_block', content: { text: "..." } }
         if (chunk.type === 'content_block' && chunk.content?.text) {
             return chunk.content.text;
+        }
+        // thinking 콘텐츠 블록은 텍스트가 아니므로 null 반환
+        if (chunk.type === 'content_block' && chunk.content?.type === 'thinking') {
+            return null; // thinking은 추론으로 별도 처리
         }
     } else if (apiSource === 'gemini') {
         // Google Gemini 형식: { candidates: [{ content: { parts: [{ text: "..." }] } }] }

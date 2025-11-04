@@ -127,13 +127,12 @@
     font-size: 16px; /* 모바일에서 자동 확대 방지 (16px 이상 필요) */
     font-family: inherit;
     resize: none;
-    height: 44px;
     min-height: 44px;
     max-height: 40vh;
     line-height: 1.2;
     transition: all var(--transition-fast);
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-    overflow-y: auto;
+    overflow-y: hidden; /* JavaScript에서 동적으로 조절 */
     -ms-overflow-style: none;  /* IE and Edge */
     scrollbar-width: none;  /* Firefox */
     box-sizing: border-box;
@@ -385,10 +384,16 @@
 .autofill-modal .form-actions {
     display: flex;
     gap: var(--spacing-md);
-    justify-content: flex-end;
+    justify-content: space-between;
+    align-items: center;
     margin-top: var(--spacing-xl);
     padding-top: var(--spacing-lg);
     border-top: 1px solid var(--border-color);
+}
+
+.autofill-modal .form-actions-right {
+    display: flex;
+    gap: var(--spacing-md);
 }
 
 .autofill-modal .btn {
@@ -444,6 +449,98 @@
     opacity: 0.5;
     cursor: not-allowed;
     transform: none !important;
+}
+
+.autofill-modal .btn-icon {
+    min-width: 44px;
+    min-height: 44px;
+    padding: var(--spacing-md);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.autofill-modal .btn-icon:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-green);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.autofill-modal .btn-icon:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+.autofill-modal .btn-icon i {
+    font-size: var(--font-size-lg);
+}
+
+/* 대필 히스토리 모달 */
+.autofill-history-modal {
+    max-width: 400px;
+    width: 90%;
+    z-index: 301; /* 대필 모달보다 위에 표시 */
+}
+
+.autofill-history-modal-container {
+    z-index: 301; /* 대필 모달보다 위에 표시 */
+}
+
+.autofill-history-modal-body {
+    padding: var(--spacing-lg);
+}
+
+.autofill-history-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.autofill-history-btn {
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    text-align: left;
+    font-size: var(--font-size-md);
+    transition: all var(--transition-fast);
+    word-break: break-word;
+    white-space: normal;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+}
+
+.autofill-history-btn:hover:not(:disabled) {
+    background: var(--bg-secondary);
+    border-color: var(--accent-green);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.autofill-history-btn:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+.autofill-history-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: var(--bg-tertiary);
+}
+
+.autofill-history-modal h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
 }
 
 /* 모달 */

@@ -85,3 +85,179 @@ function humanizedISO8601DateTime(date = Date.now()) {
     return HumanizedDateTime;
 }
 
+/**
+ * 대기 중인 효과음 재생 (탭 포커스 시 호출)
+ */
+let pendingSoundUrl = null;
+
+/**
+ * 백그라운드 탭에서도 작동하는 DOM 업데이트 대기 함수
+ * 백그라운드 탭에서는 requestAnimationFrame이 throttling되므로 즉시 실행
+ * 포커스된 탭에서는 requestAnimationFrame 사용
+ * @returns {Promise<void>}
+ */
+function waitForDOMUpdate() {
+    return new Promise((resolve) => {
+        // 백그라운드 탭 확인
+        try {
+            const isHidden = document.hidden;
+            const hasFocus = document.hasFocus();
+            
+            if (isHidden || !hasFocus) {
+                // 백그라운드 탭에서는 즉시 실행 (requestAnimationFrame이 throttling됨)
+                // DOM 업데이트는 동기적으로 즉시 반영되므로, 마이크로태스크 큐를 사용하여 즉시 실행
+                // 여러 번 호출하여 완전히 실행되도록 보장
+                Promise.resolve().then(() => {
+                    Promise.resolve().then(resolve);
+                });
+            } else {
+                // 포커스된 탭에서는 requestAnimationFrame 사용
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(resolve);
+                });
+            }
+        } catch (e) {
+            // document.hasFocus가 지원되지 않거나 오류 발생 시 폴백
+            // 백그라운드일 수 있으므로 Promise 사용
+            Promise.resolve().then(() => {
+                Promise.resolve().then(resolve);
+            });
+        }
+    });
+}
+
+/**
+ * 메시지 효과음 재생 (실리태번과 동일)
+ * @returns {Promise<void>}
+ */
+async function playMessageSound() {
+    // SettingsStorage, UserSoundStorage - 전역 스코프에서 사용
+    
+    const settings = await SettingsStorage.load();
+    
+    if (!settings.play_message_sound) {
+        return;
+    }
+    
+    // 브라우저 포커스 확인 (document.hasFocus는 대부분의 브라우저에서 지원)
+    let browserHasFocus = true;
+    try {
+        browserHasFocus = document.hasFocus();
+    } catch (e) {
+        // document.hasFocus가 지원되지 않는 경우 기본값 사용
+        browserHasFocus = true;
+    }
+    
+    // 현재 선택된 효과음 ID 가져오기
+    const currentSoundId = settings.current_sound_id || 'default';
+    
+    // 효과음 URL 가져오기
+    let soundUrl = 'public/sounds/message.mp3'; // 기본 효과음
+    
+    if (currentSoundId.startsWith('sound_')) {
+        // 기본 효과음 (sound_0, sound_1, ...)
+        const soundIndex = parseInt(currentSoundId.replace('sound_', ''), 10);
+        const defaultSoundFiles = [
+            'message.mp3',
+            'Blop.mp3',
+            'Coin.mp3',
+            'Correct.mp3',
+            'Glow.mp3',
+            'Pop.mp3',
+            'Stapler.mp3',
+            'Tiny Button.mp3'
+        ].sort((a, b) => {
+            if (a === 'message.mp3') return -1;
+            if (b === 'message.mp3') return 1;
+            return a.localeCompare(b);
+        });
+        
+        if (soundIndex >= 0 && soundIndex < defaultSoundFiles.length) {
+            soundUrl = `public/sounds/${defaultSoundFiles[soundIndex]}`;
+        }
+    } else if (currentSoundId !== 'default') {
+        // 유저 업로드 효과음 로드
+        const userSound = await UserSoundStorage.load(currentSoundId);
+        if (userSound && userSound.url) {
+            soundUrl = userSound.url;
+        }
+    }
+    
+    // play_sound_unfocused 설정 확인
+    // false = 백그라운드에서도 재생 시도, true = 포커스된 탭에서만 재생
+    // 백그라운드 탭이고 play_sound_unfocused가 true이면 재생하지 않고 대기
+    if (!browserHasFocus && settings.play_sound_unfocused) {
+        // 백그라운드 탭이고 play_sound_unfocused가 true이면 재생하지 않고 대기
+        // 탭 포커스 시 재생하도록 pendingSoundUrl에 저장
+        pendingSoundUrl = soundUrl;
+        return;
+    }
+    
+    // 오디오 엘리먼트 찾기 또는 생성
+    let audioElement = document.getElementById('audio_message_sound');
+    
+    if (!audioElement) {
+        // 오디오 엘리먼트가 없으면 생성
+        audioElement = document.createElement('audio');
+        audioElement.id = 'audio_message_sound';
+        audioElement.hidden = true;
+        document.body.appendChild(audioElement);
+    }
+    
+    // 효과음 URL 설정
+    audioElement.src = soundUrl;
+    
+    // 효과음 재생 시도
+    try {
+        audioElement.volume = 0.8;
+        audioElement.pause();
+        audioElement.currentTime = 0;
+        await audioElement.play();
+        // 재생 성공 시 대기 중인 효과음 제거
+        pendingSoundUrl = null;
+    } catch (error) {
+        // 재생 실패 시 (탭이 포커스되지 않았거나 자동 재생이 차단된 경우)
+        // play_sound_unfocused가 false이면 백그라운드에서도 재생 시도했지만 실패한 경우
+        // 대기 중인 효과음으로 저장 (탭 포커스 시 재생)
+        pendingSoundUrl = soundUrl;
+        console.debug('[playMessageSound] 효과음 재생 실패 (탭 포커스 대기):', error);
+    }
+}
+
+/**
+ * 탭 포커스 시 대기 중인 효과음 재생
+ */
+function playPendingSound() {
+    if (pendingSoundUrl) {
+        const audioElement = document.getElementById('audio_message_sound');
+        if (audioElement) {
+            audioElement.src = pendingSoundUrl;
+            audioElement.volume = 0.8;
+            audioElement.pause();
+            audioElement.currentTime = 0;
+            audioElement.play().then(() => {
+                pendingSoundUrl = null; // 재생 성공 시 대기 중인 효과음 제거
+            }).catch((error) => {
+                console.debug('[playPendingSound] 효과음 재생 실패:', error);
+            });
+        }
+    }
+}
+
+// 탭 포커스 이벤트 리스너 등록 (한 번만)
+if (typeof window !== 'undefined' && !window._messageSoundListenerAdded) {
+    window.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            // 탭이 포커스되었을 때 대기 중인 효과음 재생
+            playPendingSound();
+        }
+    });
+    
+    window.addEventListener('focus', () => {
+        // 창 포커스 시에도 대기 중인 효과음 재생
+        playPendingSound();
+    });
+    
+    window._messageSoundListenerAdded = true;
+}
+

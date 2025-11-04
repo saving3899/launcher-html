@@ -1728,9 +1728,23 @@ class PromptManager {
      * 실리태번의 renderPromptManagerListItems 함수와 동일
      */
     async renderPromptManagerListItems() {
-        // 캐릭터가 선택되어 있으면 항상 현재 선택된 캐릭터를 로드
-        // CharacterStorage - 전역 스코프에서 사용
-        const currentCharacterId = await CharacterStorage.loadCurrent();
+        // ⚠️ 중요: 캐릭터 ID는 chatManager.currentCharacterId만 사용
+        // CharacterStorage.loadCurrent()는 사용하지 않음 (잘못된 캐릭터로 연결되는 문제 방지)
+        // 이유: 프롬프트 모달을 열었다 닫으면 다른 캐릭터로 연결되는 문제 방지
+        
+        // ChatManager에서 현재 캐릭터 ID 가져오기 (유일한 소스)
+        let currentCharacterId = null;
+        try {
+            if (typeof window !== 'undefined' && window.chatManager) {
+                currentCharacterId = window.chatManager.currentCharacterId;
+            }
+        } catch (e) {
+            // chatManager에 접근할 수 없으면 무시
+        }
+        
+        // ⚠️ 중요: CharacterStorage.loadCurrent()를 사용하지 않음
+        // chatManager.currentCharacterId가 없으면 currentCharacterId는 null로 유지
+        // 이렇게 하면 프롬프트 모달이 잘못된 캐릭터로 연결되는 것을 방지
         
         // UI에서 실제로 캐릭터가 선택되어 있는지 확인
         // 1. char-name 요소 확인 (기본값 "캐릭터를 선택하세요"가 아닌지)
@@ -1751,24 +1765,52 @@ class PromptManager {
             // app 인스턴스에 접근할 수 없으면 무시
         }
         
-        // 두 조건 중 하나라도 true이면 캐릭터가 선택된 것으로 간주
-        const isCharacterSelectedInUI = isCharacterNameSet || isCharacterSelectedInApp;
+        // 3. ChatManager에서 채팅이 열려 있는지 확인 (채팅이 열려 있으면 캐릭터가 선택된 것으로 간주)
+        let isChatOpen = false;
+        try {
+            if (typeof window !== 'undefined' && window.chatManager) {
+                // 채팅이 열려 있으면 (currentChatId가 있거나 currentCharacterId가 있으면)
+                isChatOpen = !!(window.chatManager.currentChatId || window.chatManager.currentCharacterId);
+            }
+        } catch (e) {
+            // chatManager에 접근할 수 없으면 무시
+        }
+        
+        // 세 조건 중 하나라도 true이면 캐릭터가 선택된 것으로 간주
+        const isCharacterSelectedInUI = isCharacterNameSet || isCharacterSelectedInApp || isChatOpen;
+        
+        // ⚠️ 디버깅: renderPromptManagerListItems에서 캐릭터 정보 확인
+        console.log('[PromptManager.renderPromptManagerListItems] 캐릭터 정보:', {
+            currentCharacterId: currentCharacterId,
+            isCharacterSelectedInUI: isCharacterSelectedInUI,
+            isChatOpen: isChatOpen,
+            chatManagerCurrentCharacterId: window.chatManager?.currentCharacterId
+        });
         
         // UI에 캐릭터가 선택되어 있고 저장소에도 캐릭터 ID가 있을 때만 로드
         if (currentCharacterId && isCharacterSelectedInUI) {
             const character = await CharacterStorage.load(currentCharacterId);
             if (character) {
                 // 캐릭터 ID를 activeCharacter에 추가
+                // ⚠️ 중요: activeCharacter를 설정할 때 CharacterStorage.saveCurrent()를 호출하지 않음
                 this.activeCharacter = { ...character, id: currentCharacterId };
+                console.log('[PromptManager.renderPromptManagerListItems] activeCharacter 설정:', {
+                    characterId: currentCharacterId,
+                    characterName: character.name || character.data?.name
+                });
             } else {
                 // 캐릭터를 찾을 수 없으면 더미 ID로 리셋하고 저장소도 초기화
+                // 단, 채팅이 열려 있으면 저장소를 초기화하지 않음 (채팅이 끊기지 않도록)
+                if (!isChatOpen) {
                 await CharacterStorage.clearCurrent();
+                }
                 this.activeCharacter = { id: this.configuration.promptOrder.dummyId };
             }
         } else {
             // UI에 캐릭터가 선택되지 않았거나 저장소에 ID가 없으면 더미 ID로 리셋
             // 저장소에 ID가 있지만 UI에 선택되지 않았다면 저장소도 초기화
-            if (currentCharacterId && !isCharacterSelectedInUI) {
+            // 단, 채팅이 열려 있으면 저장소를 초기화하지 않음 (채팅이 끊기지 않도록)
+            if (currentCharacterId && !isCharacterSelectedInUI && !isChatOpen) {
                 await CharacterStorage.clearCurrent();
             }
             this.activeCharacter = { id: this.configuration.promptOrder.dummyId };

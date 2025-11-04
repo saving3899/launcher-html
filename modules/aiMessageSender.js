@@ -195,7 +195,8 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
 
     // DOM 업데이트 완료 대기 (addMessage 후 DOM이 반영될 시간 확보)
     // 재생성 시에는 이미 DOM이 업데이트되었지만, 다시 한 번 확실하게 대기
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    // 메시지 삭제 후 즉시 새 메시지를 보낼 때를 대비해 더 많은 대기 시간 추가
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve)))));
 
     // 정지 신호 확인 (DOM 업데이트 대기 후에도 체크)
     if (chatManager.abortController?.signal?.aborted) {
@@ -204,25 +205,96 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
 
     // 현재 채팅 히스토리 가져오기 (DOM에서 읽기)
     // 중요: 재생성 시에는 이 시점에서 DOM이 완전히 업데이트되어야 삭제된 메시지가 제외됨
-    // getChatHistory() 호출 전에 한 번 더 signal 체크
+    // getChatHistory() 호출 전에 한 번 더 signal 체크 및 DOM 업데이트 확인
     if (chatManager.abortController?.signal?.aborted) {
         throw new DOMException('The operation was aborted.', 'AbortError');
     }
     
+    // DOM 업데이트가 완전히 반영되었는지 확인하기 위해 한 번 더 대기
+    // (메시지 삭제 후 즉시 새 메시지를 보낼 때를 대비)
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    
+    console.log('[AIMessageSender] getChatHistory() 호출 전:', {
+        userMessage: userMessage?.substring(0, 50) || '(빈 메시지)',
+        generateType,
+        skipGreetingCheck
+    });
+    
     const existingChatHistory = chatManager.getChatHistory();
     let chatHistory = [...existingChatHistory];
     
+    console.log('[AIMessageSender] getChatHistory() 호출 후:', {
+        historyCount: chatHistory.length,
+        historyPreview: chatHistory.map(msg => ({
+            role: msg.role,
+            contentPreview: msg.content?.substring(0, 50) || 'no-content'
+        }))
+    });
+    
     // 그리팅(첫 메시지)이 DOM에 없으면 추가
     // 재생성 시에는 스킵 (삭제된 메시지에 그리팅이 포함되어 있을 수 있음)
+    // 중요: 메시지를 삭제한 후 새 메시지를 생성할 때는 그리팅을 추가하지 않아야 함
+    // (삭제된 메시지가 그리팅이었을 수 있으므로)
     if (!skipGreetingCheck) {
+        // 메시지가 최근에 삭제되었는지 확인
+        const messageDeletedRecently = chatManager._messageDeletedRecently || false;
+        
+        // IndexedDB에 저장된 메시지가 있는지 확인 (채팅이 이미 시작된 경우)
+        // currentChatId가 있고 IndexedDB에 메시지가 저장되어 있으면 그리팅을 추가하지 않음
+        // 중요: 메시지 삭제 후 saveChat이 메시지를 0개로 저장했으면,
+        // IndexedDB에도 메시지가 0개로 저장되어 있어야 함
+        // 하지만 saveChat 직후 IndexedDB 쓰기가 완전히 반영되지 않았을 수 있으므로,
+        // messageDeletedRecently 플래그도 함께 확인
+        let hasStoredMessages = false;
+        if (chatManager.currentChatId && !messageDeletedRecently) {
+            // 메시지가 최근에 삭제되지 않았을 때만 IndexedDB 확인
+            // (삭제 후에는 IndexedDB 확인이 불필요함 - 플래그로 충분)
+            try {
+                // ChatStorage - 전역 스코프에서 사용
+                const storedChatData = await ChatStorage.load(chatManager.currentChatId);
+                if (storedChatData && storedChatData.messages && storedChatData.messages.length > 0) {
+                    hasStoredMessages = true;
+                }
+            } catch (error) {
+                // 오류가 발생해도 계속 진행
+                console.debug('[AIMessageSender] 저장된 채팅 확인 중 오류 (무시):', error);
+            }
+        }
+        
         const hasGreeting = chatHistory.some(m => m.role === 'assistant' && m.content && m.content.trim());
-        if (!hasGreeting) {
+        
+        // 그리팅 추가 조건:
+        // 1. DOM에 그리팅이 없고
+        // 2. 메시지가 최근에 삭제되지 않았고
+        // 3. IndexedDB에 저장된 메시지가 없을 때 (완전히 새로운 채팅일 때만)
+        const shouldAddGreeting = !hasGreeting && !messageDeletedRecently && !hasStoredMessages;
+        
+        console.log('[AIMessageSender] 그리팅 체크:', {
+            hasGreeting,
+            chatHistoryLength: chatHistory.length,
+            messageDeletedRecently,
+            hasStoredMessages,
+            currentChatId: chatManager.currentChatId,
+            willAddGreeting: shouldAddGreeting
+        });
+        
+        if (shouldAddGreeting) {
             const firstMessage = character?.data?.first_mes || character?.first_mes || '';
             if (firstMessage && firstMessage.trim()) {
                 // 실리태번과 동일: substituteParams로 매크로 치환 (6792번 라인)
                 // substituteParams - 전역 스코프에서 사용
                 const processedGreeting = substituteParams(firstMessage.trim(), 'User', characterName);
                 chatHistory.unshift({ role: 'assistant', content: processedGreeting });
+                
+                console.log('[AIMessageSender] 그리팅 추가됨:', {
+                    greetingPreview: processedGreeting.substring(0, 50)
+                });
+            }
+        } else {
+            if (messageDeletedRecently) {
+                console.log('[AIMessageSender] 그리팅 추가 스킵: 메시지가 최근에 삭제됨');
+            } else if (hasStoredMessages) {
+                console.log('[AIMessageSender] 그리팅 추가 스킵: IndexedDB에 저장된 메시지가 있음 (채팅이 이미 시작됨)');
             }
         }
     }
@@ -285,13 +357,35 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
     // prepareOpenAIMessages 호출
     let messages = null;
     try {
+        // prepareOpenAIMessagesFromCharacter에 전달되는 chatHistory 확인
+        console.log('[AIMessageSender] prepareOpenAIMessagesFromCharacter 호출 전:', {
+            chatHistoryCount: chatHistory.length,
+            chatHistoryPreview: chatHistory.map(msg => ({
+                role: msg.role,
+                contentPreview: msg.content?.substring(0, 50) || 'no-content'
+            })),
+            generateType: generateType === 'continue' ? 'continue' : 'normal'
+        });
+        
+        // 캐릭터 정보 확인 및 검증
+        const actualCharacterName = character?.data?.name || character?.name || 'Character';
+        if (actualCharacterName !== characterName) {
+            console.warn('[AIMessageSender] 캐릭터 이름 불일치:', {
+                expected: characterName,
+                actual: actualCharacterName,
+                characterId: currentCharId
+            });
+            // 캐릭터 객체에서 가져온 이름 사용
+            characterName = actualCharacterName;
+        }
+        
         // prepareOpenAIMessagesFromCharacter - 전역 스코프에서 사용
         const [messagesResult, success] = await prepareOpenAIMessagesFromCharacter(
             {
                 character,
                 chatMetadata: {},
                 name1: 'User',
-                name2: characterName,
+                name2: characterName, // 검증된 캐릭터 이름 사용
                 additionalOptions: {
                     messages: chatHistory,
                     type: generateType === 'continue' ? 'continue' : 'normal',
@@ -498,10 +592,75 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
             );
         } else {
             // 비스트리밍 응답 처리
-            responseText = await chatManager.callAIWithoutStreaming(
+            console.log('[AIMessageSender] 비스트리밍 모드로 API 호출:', {
+                apiProvider,
+                generateType
+            });
+            
+            const response = await chatManager.callAIWithoutStreaming(
                 apiProvider,
                 apiOptions
             );
+
+            console.log('[AIMessageSender] 비스트리밍 응답 받음:', {
+                responseType: typeof response,
+                isObject: typeof response === 'object' && response !== null,
+                hasText: typeof response === 'object' && response !== null ? !!response.text : false,
+                hasReasoning: typeof response === 'object' && response !== null ? !!response.reasoning : false
+            });
+            
+            // response가 객체인지 문자열인지 확인
+            let reasoning = null;
+            if (typeof response === 'object' && response !== null) {
+                responseText = response.text || response.content || '';
+                reasoning = response.reasoning || null;
+                
+                console.log('[AIMessageSender] 비스트리밍 응답에서 추론 확인:', {
+                    responseTextLength: responseText.length,
+                    responseTextPreview: responseText.substring(0, 200),
+                    reasoningLength: reasoning ? reasoning.length : 0,
+                    reasoningPreview: reasoning ? reasoning.substring(0, 200) : null,
+                    textIncludesReasoning: reasoning && reasoning.trim() ? responseText.includes(reasoning.trim()) : false
+                });
+                
+                // 추론 내용이 텍스트에 포함되어 있으면 제거
+                if (reasoning && reasoning.trim()) {
+                    const reasoningTrimmed = reasoning.trim();
+                    if (responseText.includes(reasoningTrimmed)) {
+                        console.log('[AIMessageSender] 비스트리밍: 추론 내용이 텍스트에 포함되어 있음, 제거 시작');
+                        
+                        // 모든 위치에서 추론 제거
+                        let cleanedText = responseText;
+                        
+                        // 시작 부분에서 제거 (반복)
+                        while (cleanedText.startsWith(reasoningTrimmed)) {
+                            cleanedText = cleanedText.substring(reasoningTrimmed.length).trim();
+                        }
+                        
+                        // 끝 부분에서 제거 (반복)
+                        while (cleanedText.endsWith(reasoningTrimmed)) {
+                            cleanedText = cleanedText.substring(0, cleanedText.length - reasoningTrimmed.length).trim();
+                        }
+                        
+                        // 중간 부분에서 제거 (모든 발생)
+                        cleanedText = cleanedText.split(reasoningTrimmed).join('').trim();
+                        
+                        responseText = cleanedText;
+                        
+                        console.log('[AIMessageSender] 비스트리밍: 추론 제거 후:', {
+                            responseTextLength: responseText.length,
+                            responseTextPreview: responseText.substring(0, 200)
+                        });
+                    } else {
+                        console.log('[AIMessageSender] 비스트리밍: 추론 내용이 텍스트에 포함되어 있지 않음 (별도 필드로만 옴)');
+                    }
+                } else {
+                    console.log('[AIMessageSender] 비스트리밍: 추론 내용 없음');
+                }
+            } else {
+                responseText = response;
+                console.log('[AIMessageSender] 비스트리밍: 문자열 응답 (추론 정보 없음)');
+            }
 
             // 계속하기 모드 처리
             if (generateType === 'continue') {
@@ -569,11 +728,11 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
                     }
                 } else {
                     // 기존 메시지를 찾을 수 없으면 새 메시지 추가
-                    await chatManager.addMessage(responseText, 'assistant', characterName, characterAvatar);
+                    await chatManager.addMessage(responseText, 'assistant', characterName, characterAvatar, [], 0, null, null, reasoning);
                 }
             } else {
             // 정규식은 addMessage에서 적용되므로 원본 텍스트 전달
-            await chatManager.addMessage(responseText, 'assistant', characterName, characterAvatar);
+            await chatManager.addMessage(responseText, 'assistant', characterName, characterAvatar, [], 0, null, null, reasoning);
             }
         }
     } catch (error) {
