@@ -2690,7 +2690,9 @@ class ChatManager {
             fullText = existingMessageText + continuePostfix;
         } else {
             // 새 메시지 생성
-            messageWrapper = await this.addMessage(placeholderText, 'assistant', characterName, characterAvatar, [], 0);
+            // promptInfo 전달 (스트리밍 모드)
+            const promptInfo = options._promptInfo || null;
+            messageWrapper = await this.addMessage(placeholderText, 'assistant', characterName, characterAvatar, [], 0, null, null, null, null, promptInfo);
             messageTextElement = messageWrapper.querySelector('.message-text');
             fullText = '';
         }
@@ -2944,7 +2946,7 @@ class ChatManager {
      * @param {Array<string>} swipes - 스와이프 가능한 대안 응답 배열 (assistant일 때 사용)
      * @param {number} swipeIndex - 현재 표시할 스와이프 인덱스 (기본값: 0)
      */
-    async addMessage(text, sender, characterName = null, characterAvatar = null, swipes = [], swipeIndex = 0, userAvatar = null, sendDate = null, reasoning = null, originalUserName = null) {
+    async addMessage(text, sender, characterName = null, characterAvatar = null, swipes = [], swipeIndex = 0, userAvatar = null, sendDate = null, reasoning = null, originalUserName = null, promptInfo = null) {
         // 사용자 이름과 캐릭터 이름 가져오기 (매크로 치환용)
         let userName = '';
         let charName = characterName || '';
@@ -3343,6 +3345,16 @@ class ChatManager {
             const actionButtons = document.createElement('div');
             actionButtons.className = 'message-action-buttons';
             
+            // 문서 아이콘 버튼 (맨 왼쪽)
+            const documentBtn = document.createElement('button');
+            documentBtn.className = 'message-action-btn message-document-btn';
+            documentBtn.innerHTML = '<i class="fa-solid fa-file"></i>';
+            documentBtn.setAttribute('aria-label', '프롬프트 정보');
+            documentBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.showPromptInfoModal(messageWrapper);
+            });
+            
             const editBtn = document.createElement('button');
             editBtn.className = 'message-action-btn message-edit-btn';
             editBtn.innerHTML = '<i class="fa-solid fa-pencil"></i>';
@@ -3353,8 +3365,9 @@ class ChatManager {
             });
             
             // 재생성 버튼 (assistant 메시지에만)
+            let regenerateBtn = null;
             if (sender === 'assistant') {
-                const regenerateBtn = document.createElement('button');
+                regenerateBtn = document.createElement('button');
                 regenerateBtn.className = 'message-action-btn message-regenerate-btn';
                 regenerateBtn.innerHTML = '<i class="fa-solid fa-arrow-rotate-right"></i>';
                 regenerateBtn.setAttribute('aria-label', '재생성');
@@ -3362,7 +3375,6 @@ class ChatManager {
                     e.stopPropagation();
                     this.regenerateMessage(messageWrapper);
                 });
-                actionButtons.appendChild(regenerateBtn);
             }
             
             const deleteBtn = document.createElement('button');
@@ -3374,6 +3386,11 @@ class ChatManager {
                 this.deleteMessage(messageWrapper);
             });
             
+            // 버튼 추가 순서: 문서 버튼이 맨 왼쪽
+            actionButtons.appendChild(documentBtn);
+            if (regenerateBtn) {
+                actionButtons.appendChild(regenerateBtn);
+            }
             actionButtons.appendChild(editBtn);
             actionButtons.appendChild(deleteBtn);
             return actionButtons;
@@ -3471,6 +3488,7 @@ class ChatManager {
                 mes: text, // 원본 텍스트 (processedText가 아닌)
                 extra: {
                     swipes: sender === 'assistant' && swipes.length > 0 ? swipes : [],
+                    promptInfo: promptInfo || null, // 프롬프트 정보 저장
                 },
             };
             
@@ -7519,6 +7537,223 @@ class ChatManager {
      * 
      * @param {HTMLElement} messageWrapper - 메시지 래퍼 요소
      */
+    /**
+     * 프롬프트 정보 모달 표시
+     * @param {HTMLElement} messageWrapper - 메시지 래퍼 요소
+     */
+    async showPromptInfoModal(messageWrapper) {
+        if (!messageWrapper) {
+            return;
+        }
+        
+        const messageUuid = messageWrapper.dataset.messageUuid;
+        if (!messageUuid) {
+            if (typeof showToast === 'function') {
+                showToast('메시지 정보를 찾을 수 없습니다.', 'error');
+            }
+            return;
+        }
+        
+        const chatMessage = this.chat.find(msg => msg.uuid === messageUuid);
+        if (!chatMessage) {
+            if (typeof showToast === 'function') {
+                showToast('메시지 정보를 찾을 수 없습니다.', 'error');
+            }
+            return;
+        }
+        
+        const promptInfo = chatMessage.extra?.promptInfo;
+        if (!promptInfo) {
+            if (typeof showToast === 'function') {
+                showToast('이 메시지에는 프롬프트 정보가 저장되어 있지 않습니다.', 'warning');
+            }
+            return;
+        }
+        
+        // 기존 모달 제거
+        const existingModal = document.getElementById('prompt-info-modal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+        const existingOverlay = document.getElementById('prompt-info-modal-overlay');
+        if (existingOverlay) {
+            existingOverlay.remove();
+        }
+        
+        // 오버레이 생성
+        const overlay = document.createElement('div');
+        overlay.className = 'overlay';
+        overlay.id = 'prompt-info-modal-overlay';
+        
+        // 모달 생성
+        const modal = document.createElement('div');
+        modal.className = 'prompt-info-modal';
+        modal.id = 'prompt-info-modal';
+        
+        const modalContent = document.createElement('div');
+        modalContent.className = 'modal-content';
+        
+        // 헤더
+        const modalHeader = document.createElement('div');
+        modalHeader.className = 'modal-header';
+        const headerTitle = document.createElement('h2');
+        headerTitle.textContent = '프롬프트 정보';
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'icon-btn';
+        closeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+        closeBtn.setAttribute('aria-label', '닫기');
+        modalHeader.appendChild(headerTitle);
+        modalHeader.appendChild(closeBtn);
+        
+        // 바디
+        const modalBody = document.createElement('div');
+        modalBody.className = 'modal-body';
+        
+        // API/Model 정보 섹션
+        const infoSection = document.createElement('div');
+        infoSection.className = 'prompt-info-section';
+        const infoTitle = document.createElement('h3');
+        infoTitle.className = 'prompt-info-title';
+        infoTitle.textContent = 'API/Model 정보';
+        const infoContent = document.createElement('div');
+        infoContent.className = 'prompt-info-content';
+        
+        const apiProviderLabel = document.createElement('div');
+        apiProviderLabel.className = 'prompt-info-label';
+        apiProviderLabel.textContent = 'API Provider:';
+        const apiProviderValue = document.createElement('div');
+        apiProviderValue.className = 'prompt-info-value';
+        apiProviderValue.textContent = promptInfo.apiProvider || 'N/A';
+        
+        const modelLabel = document.createElement('div');
+        modelLabel.className = 'prompt-info-label';
+        modelLabel.textContent = 'Model:';
+        const modelValue = document.createElement('div');
+        modelValue.className = 'prompt-info-value';
+        modelValue.textContent = promptInfo.model || 'N/A';
+        
+        infoContent.appendChild(apiProviderLabel);
+        infoContent.appendChild(apiProviderValue);
+        infoContent.appendChild(modelLabel);
+        infoContent.appendChild(modelValue);
+        infoSection.appendChild(infoTitle);
+        infoSection.appendChild(infoContent);
+        
+        // 프롬프트 내용 섹션
+        const promptSection = document.createElement('div');
+        promptSection.className = 'prompt-section';
+        const promptTitle = document.createElement('h3');
+        promptTitle.className = 'prompt-info-title';
+        promptTitle.textContent = '프롬프트 내용';
+        const promptContent = document.createElement('div');
+        promptContent.className = 'prompt-content-container';
+        const promptText = document.createElement('div');
+        promptText.className = 'prompt-text';
+        
+        // 프롬프트 내용 추출 및 표시
+        if (promptInfo.messages && Array.isArray(promptInfo.messages)) {
+            const promptTextContent = promptInfo.messages
+                .map(msg => {
+                    if (typeof msg === 'string') {
+                        return msg;
+                    } else if (msg && typeof msg === 'object') {
+                        // role 정보는 제외하고 content만 추출
+                        if (typeof msg.content === 'string') {
+                            return msg.content;
+                        } else if (Array.isArray(msg.content)) {
+                            // content가 배열인 경우 (예: multimodal)
+                            return msg.content
+                                .map(item => {
+                                    if (typeof item === 'string') {
+                                        return item;
+                                    } else if (item && typeof item === 'object' && item.type === 'text') {
+                                        return item.text || '';
+                                    }
+                                    return '';
+                                })
+                                .join('');
+                        }
+                        return '';
+                    }
+                    return '';
+                })
+                .filter(text => text && text.trim())
+                .join('\n\n');
+            
+            promptText.textContent = promptTextContent || '프롬프트 내용이 비어있습니다.';
+        } else {
+            promptText.textContent = '프롬프트 정보가 없습니다.';
+        }
+        
+        promptContent.appendChild(promptText);
+        promptSection.appendChild(promptTitle);
+        promptSection.appendChild(promptContent);
+        
+        modalBody.appendChild(infoSection);
+        modalBody.appendChild(promptSection);
+        
+        modalContent.appendChild(modalHeader);
+        modalContent.appendChild(modalBody);
+        modal.appendChild(modalContent);
+        
+        // 닫기 함수
+        const closeModal = () => {
+            modal.classList.add('closing');
+            overlay.classList.add('closing');
+            
+            setTimeout(() => {
+                modal.remove();
+                overlay.remove();
+            }, 300);
+        };
+        
+        // 이벤트 리스너
+        closeBtn.addEventListener('click', () => {
+            closeModal();
+        });
+        
+        // 오버레이 클릭 시 닫기
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                closeModal();
+            }
+        });
+        
+        // 모달 자체 클릭 시 닫기 (모달 콘텐츠가 아닌 부분)
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                closeModal();
+            }
+        });
+        
+        // 모달 콘텐츠 클릭 시 이벤트 전파 중지
+        modalContent.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+        
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                closeModal();
+                document.removeEventListener('keydown', handleEscape);
+            }
+        };
+        document.addEventListener('keydown', handleEscape);
+        
+        // DOM에 추가
+        document.body.appendChild(overlay);
+        document.body.appendChild(modal);
+        
+        // 애니메이션 트리거 (다른 모달과 동일한 방식)
+        // :not(.hidden):not(.closing) 조건에 맞으면 자동으로 애니메이션 실행됨
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                // 애니메이션이 트리거되도록 강제 reflow
+                void modal.offsetHeight;
+                void overlay.offsetHeight;
+            });
+        });
+    }
+
     async deleteMessage(messageWrapper) {
         if (!messageWrapper || !messageWrapper.parentNode) {
             // 경고 코드 토스트 알림 표시

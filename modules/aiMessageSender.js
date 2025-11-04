@@ -622,6 +622,12 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
         if (streamEnabled) {
             // 스트리밍 응답 처리
             // generateType 전달 (계속하기 기능에서 사용)
+            // promptInfo 전달을 위해 options에 추가
+            apiOptions._promptInfo = {
+                apiProvider: apiProvider,
+                model: model,
+                messages: messages
+            };
             responseText = await chatManager.callAIWithStreaming(
                 apiProvider,
                 apiOptions,
@@ -767,11 +773,21 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
                     }
                 } else {
                     // 기존 메시지를 찾을 수 없으면 새 메시지 추가
-                    await chatManager.addMessage(responseText, 'assistant', characterName, characterAvatar, [], 0, null, null, reasoning);
+                    const promptInfo = {
+                        apiProvider: apiProvider,
+                        model: model,
+                        messages: messages
+                    };
+                    await chatManager.addMessage(responseText, 'assistant', characterName, characterAvatar, [], 0, null, null, reasoning, null, promptInfo);
                 }
             } else {
             // 정규식은 addMessage에서 적용되므로 원본 텍스트 전달
-            await chatManager.addMessage(responseText, 'assistant', characterName, characterAvatar, [], 0, null, null, reasoning);
+            const promptInfo = {
+                apiProvider: apiProvider,
+                model: model,
+                messages: messages
+            };
+            await chatManager.addMessage(responseText, 'assistant', characterName, characterAvatar, [], 0, null, null, reasoning, null, promptInfo);
             }
         }
     } catch (error) {

@@ -42,7 +42,7 @@ class SettingsManager {
                 chatCompletionSourceSelect._hasChangeHandler = true;
                 chatCompletionSourceSelect.addEventListener('change', async () => {
                 this.toggleProviderSpecificSettings();
-                this.updateModelOptions();
+                await this.updateModelOptions();
                     // API 변경 시 설정 저장 (새로고침 후에도 유지되도록)
                     await this.saveSettings();
                     // 프롬프트 패널이 열려있으면 업데이트하도록 이벤트 발송
@@ -255,12 +255,32 @@ class SettingsManager {
         this.elements.overlay.classList.add('closing');
         this.elements.settingsModal.style.pointerEvents = 'none';
         
+        // 오버레이의 pointerEvents를 즉시 none으로 설정하여 메뉴 버튼 클릭 허용
+        // (오버레이가 메뉴 버튼을 가리지 않도록)
+        this.elements.overlay.style.pointerEvents = 'none';
+        
+        // 오버레이 클릭 이벤트를 일시적으로 무시 (메뉴가 열리는 것을 방지)
+        // 설정 모달 닫기 애니메이션이 완료될 때까지 오버레이 클릭 무시
+        this.elements.overlay.dataset.ignoringClicks = 'true';
+        
+        // 실제로 열려있는 모달/패널 확인 (hidden 클래스 체크)
         const panelContainer = document.getElementById('panel-modal-container');
-        const sideMenuOpen = !this.elements.sideMenu.classList.contains('hidden');
+        const panelContainerOpen = panelContainer && !panelContainer.classList.contains('hidden');
+        const sideMenu = document.getElementById('side-menu');
+        const sideMenuOpen = sideMenu && !sideMenu.classList.contains('hidden');
         
         // 오버레이 정리 함수
         const cleanupOverlay = () => {
-            if (!panelContainer && !sideMenuOpen) {
+            // 실제로 열려있는 모달/패널/메뉴 다시 확인
+            const panelContainerCheck = document.getElementById('panel-modal-container');
+            const panelContainerOpenCheck = panelContainerCheck && !panelContainerCheck.classList.contains('hidden');
+            const sideMenuCheck = document.getElementById('side-menu');
+            const sideMenuOpenCheck = sideMenuCheck && !sideMenuCheck.classList.contains('hidden');
+            
+            // 오버레이 클릭 이벤트 무시 해제
+            delete this.elements.overlay.dataset.ignoringClicks;
+            
+            if (!panelContainerOpenCheck && !sideMenuOpenCheck) {
                 // 다른 모달이 없으면 오버레이 완전히 숨김
                 this.elements.overlay.classList.remove('closing');
                 this.elements.overlay.classList.add('hidden');
@@ -282,20 +302,42 @@ class SettingsManager {
             this.elements.settingsModal.classList.add('hidden');
             this.elements.settingsModal.style.pointerEvents = '';
             
+            // 실제로 열려있는 모달/패널 다시 확인 (애니메이션 중에 상태가 변경되었을 수 있음)
+            const panelContainerAfter = document.getElementById('panel-modal-container');
+            const panelContainerOpenAfter = panelContainerAfter && !panelContainerAfter.classList.contains('hidden');
+            const sideMenuAfter = document.getElementById('side-menu');
+            const sideMenuOpenAfter = sideMenuAfter && !sideMenuAfter.classList.contains('hidden');
+            
             // 오버레이 정리
-            if (!panelContainer && !sideMenuOpen) {
-                // 오버레이 애니메이션 완료 대기
-                const handleOverlayEnd = () => {
-                    this.elements.overlay.removeEventListener('animationend', handleOverlayEnd);
-                    cleanupOverlay();
-                };
-                this.elements.overlay.addEventListener('animationend', handleOverlayEnd);
-                
-                // 타임아웃으로 강제 정리 (최대 500ms 후)
+            // 다른 모달이나 메뉴가 없을 때만 오버레이를 완전히 숨김
+            // 메뉴가 곧 열릴 수 있으므로 약간의 지연을 두고 확인
+            if (!panelContainerOpenAfter && !sideMenuOpenAfter) {
+                // 짧은 지연 후 다시 확인 (메뉴가 열리는 중일 수 있음)
                 setTimeout(() => {
-                    this.elements.overlay.removeEventListener('animationend', handleOverlayEnd);
-                    cleanupOverlay();
-                }, 500);
+                    const panelContainerFinal = document.getElementById('panel-modal-container');
+                    const panelContainerOpenFinal = panelContainerFinal && !panelContainerFinal.classList.contains('hidden');
+                    const sideMenuFinal = document.getElementById('side-menu');
+                    const sideMenuOpenFinal = sideMenuFinal && !sideMenuFinal.classList.contains('hidden');
+                    
+                    // 최종 확인: 여전히 다른 모달이나 메뉴가 없으면 오버레이 숨김
+                    if (!panelContainerOpenFinal && !sideMenuOpenFinal) {
+                        // 오버레이 애니메이션 완료 대기
+                        const handleOverlayEnd = () => {
+                            this.elements.overlay.removeEventListener('animationend', handleOverlayEnd);
+                            cleanupOverlay();
+                        };
+                        this.elements.overlay.addEventListener('animationend', handleOverlayEnd);
+                        
+                        // 타임아웃으로 강제 정리 (최대 500ms 후)
+                        setTimeout(() => {
+                            this.elements.overlay.removeEventListener('animationend', handleOverlayEnd);
+                            cleanupOverlay();
+                        }, 500);
+                    } else {
+                        // 메뉴나 다른 모달이 열렸으면 오버레이 유지
+                        cleanupOverlay();
+                    }
+                }, 100);
             } else {
                 cleanupOverlay();
             }
@@ -311,7 +353,23 @@ class SettingsManager {
                 this.elements.settingsModal.classList.remove('closing');
                 this.elements.settingsModal.classList.add('hidden');
                 this.elements.settingsModal.style.pointerEvents = '';
-                cleanupOverlay();
+                
+                // 타임아웃 시에도 실제 상태 확인 후 정리
+                // 오버레이 클릭 이벤트 무시 해제
+                delete this.elements.overlay.dataset.ignoringClicks;
+                
+                const panelContainerTimeout = document.getElementById('panel-modal-container');
+                const panelContainerOpenTimeout = panelContainerTimeout && !panelContainerTimeout.classList.contains('hidden');
+                const sideMenuTimeout = document.getElementById('side-menu');
+                const sideMenuOpenTimeout = sideMenuTimeout && !sideMenuTimeout.classList.contains('hidden');
+                
+                if (!panelContainerOpenTimeout && !sideMenuOpenTimeout) {
+                    cleanupOverlay();
+                } else {
+                    // 메뉴나 다른 모달이 열려있으면 오버레이 유지
+                    this.elements.overlay.classList.remove('closing');
+                    this.elements.overlay.style.pointerEvents = '';
+                }
             }
         }, 500);
     }
@@ -351,7 +409,7 @@ class SettingsManager {
         // UI 업데이트 (변경 이벤트는 트리거하지 않고 직접 호출)
         // change 이벤트 트리거 시 saveSettings가 호출되어 무한 루프 가능
         this.toggleProviderSpecificSettings();
-        this.updateModelOptions();
+        await this.updateModelOptions();
         
         // 프롬프트 패널 업데이트를 위한 이벤트 발송 (설정 로드 완료 후)
         // 최종 select 값 사용
@@ -402,7 +460,7 @@ class SettingsManager {
         this.toggleProviderSpecificSettings();
         
         // 모델 목록 업데이트
-        this.updateModelOptions();
+        await this.updateModelOptions();
         
         // 모든 제공업체의 모델 필드에 값 설정
         const apiModels = settings.apiModels || {};
@@ -540,7 +598,7 @@ class SettingsManager {
     /**
      * 제공업체별 모델 옵션 업데이트
      */
-    updateModelOptions() {
+    async updateModelOptions() {
         const chatCompletionSourceSelect = document.getElementById('chat-completion-source');
         if (!chatCompletionSourceSelect) return;
 
@@ -578,6 +636,16 @@ class SettingsManager {
         const modelSelect = document.getElementById(modelSelectId);
         if (!modelSelect) return;
         
+        // 현재 선택된 모델 값 저장 (옵션 재생성 전)
+        const currentSelectedModel = modelSelect.value || '';
+        
+        // SettingsStorage에서 저장된 모델 값도 확인
+        const settings = await SettingsStorage.load();
+        const savedModel = settings.apiModels?.[provider] || '';
+        
+        // 우선순위: 현재 선택된 값 > 저장된 값
+        const modelToRestore = currentSelectedModel || savedModel;
+        
         // 모델 목록 가져오기
         const models = getModelsForProvider(provider);
         
@@ -600,6 +668,11 @@ class SettingsManager {
             option.textContent = model;
             modelSelect.appendChild(option);
         });
+        
+        // 저장된 모델 값 복원 (옵션이 존재하는 경우에만)
+        if (modelToRestore && models.includes(modelToRestore)) {
+            modelSelect.value = modelToRestore;
+        }
     }
 
     /**
@@ -661,7 +734,15 @@ class SettingsManager {
             if (inputId) {
                 const input = document.getElementById(inputId);
                 if (input) {
-                    apiKeys[providerKey] = input.value || '';
+                    const apiKeyValue = input.value || '';
+                    // 에러 메시지가 포함된 경우 저장하지 않음 (이전 값 유지)
+                    if (apiKeyValue && !apiKeyValue.includes('[ERR_') && !apiKeyValue.includes('오류') && !apiKeyValue.includes('호출')) {
+                        apiKeys[providerKey] = apiKeyValue;
+                    } else if (!apiKeyValue) {
+                        // 빈 값이면 저장
+                        apiKeys[providerKey] = '';
+                    }
+                    // 에러 메시지가 포함된 경우 기존 값 유지 (저장하지 않음)
                 }
             } else {
                 // Pollinations는 API 키 없음
@@ -875,6 +956,10 @@ class SettingsManager {
             const apiProvider = chatCompletionSourceSelect.value;
 
             // API 키 확인 (Vertex AI Full 모드는 Service Account JSON 사용)
+            // SettingsStorage에서 먼저 가져오기 (저장된 값 사용)
+            const settings = await SettingsStorage.load();
+            const apiKeys = settings.apiKeys || {};
+            
             let apiKey = null;
             let vertexaiServiceAccountJson = null;
             
@@ -891,17 +976,25 @@ class SettingsManager {
                     // Full 모드에서는 API 키가 필요 없음
                     apiKey = null;
                 } else {
-                    // Express 모드: API 키 확인
-                    apiKey = this.getApiKeyForProvider(apiProvider);
+                    // Express 모드: API 키 확인 (SettingsStorage 우선, 없으면 DOM에서)
+                    apiKey = apiKeys[apiProvider] || this.getApiKeyForProvider(apiProvider);
                     if (!apiKey) {
                         this.showApiStatus('API 키를 입력해주세요.', 'error');
                         return;
                     }
                 }
             } else {
-                apiKey = this.getApiKeyForProvider(apiProvider);
+                // SettingsStorage에서 먼저 가져오기 (저장된 값 사용)
+                apiKey = apiKeys[apiProvider] || this.getApiKeyForProvider(apiProvider);
+                
                 if (!apiKey && apiProvider !== 'pollinations' && apiProvider !== 'custom') {
                     this.showApiStatus('API 키를 입력해주세요.', 'error');
+                    return;
+                }
+                
+                // API 키에 에러 메시지가 포함되어 있는지 확인
+                if (apiKey && (apiKey.includes('[ERR_') || apiKey.includes('오류') || apiKey.includes('호출'))) {
+                    this.showApiStatus('저장된 API 키가 유효하지 않습니다. 설정에서 다시 입력해주세요.', 'error');
                     return;
                 }
             }
@@ -925,8 +1018,7 @@ class SettingsManager {
 
             // callAI - 전역 스코프에서 사용
             
-            // 설정에서 추가 옵션 가져오기
-            const settings = await SettingsStorage.load();
+            // 설정에서 추가 옵션 가져오기 (위에서 이미 로드했으므로 재사용)
             
             // Vertex AI 관련 설정 가져오기
             let vertexaiAuthMode = 'express';
@@ -961,7 +1053,7 @@ class SettingsManager {
                 model: model,
                 messages: [{ role: 'user', content: 'Hi' }],
                 temperature: 1.0,
-                maxTokens: 50,
+                maxTokens: 100, // 테스트 메시지용 충분한 토큰 수
                 stream: false,
                 azureBaseUrl: settings.azure_base_url,
                 azureDeploymentName: settings.azure_deployment_name,

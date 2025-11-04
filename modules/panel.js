@@ -282,6 +282,11 @@ class PanelManager {
                 return;
             }
             
+            // 오버레이 클릭이 무시되도록 설정되어 있으면 무시
+            if (this.elements.overlay.dataset.ignoringClicks === 'true') {
+                return;
+            }
+            
             // 클릭한 곳이 오버레이 자체인지 확인 (모달 내부 클릭은 무시)
             if (e.target !== this.elements.overlay) {
                 return;
@@ -332,7 +337,11 @@ class PanelManager {
             }
 
             // 패널이 없으면 사이드 메뉴와 설정 모달 닫기
-            if (this.callbacks.onOverlayClick) {
+            // 단, 메뉴가 열리는 중이면 무시 (메뉴가 열리자마자 닫히는 것을 방지)
+            const sideMenu = document.getElementById('side-menu');
+            const isMenuOpening = sideMenu && sideMenu.dataset.opening === 'true';
+            
+            if (!isMenuOpening && this.callbacks.onOverlayClick) {
                 this.callbacks.onOverlayClick();
             }
         });

@@ -1072,6 +1072,44 @@ async function handleModelChange(panelContainer, apiProvider) {
             await SettingsStorage.save(updatedSettings);
         }
     }
+    
+    // Google Vertex AI / MakerSuite 모델의 경우 온도 제한 적용
+    if (apiProvider === 'vertexai' || apiProvider === 'makersuite') {
+        // vision/ultra/gemma 모델은 최대 온도 1.0, 나머지는 2.0
+        const maxTemp = (selectedModel.includes('vision') || selectedModel.includes('ultra') || selectedModel.includes('gemma')) ? 1.0 : 2.0;
+        
+        const tempSlider = panelContainer.querySelector('#temp_openai');
+        const tempCounter = panelContainer.querySelector('#temp_counter_openai');
+        
+        if (tempSlider && tempCounter) {
+            // 온도 슬라이더의 max 속성 업데이트
+            tempSlider.setAttribute('max', maxTemp);
+            tempCounter.setAttribute('max', maxTemp);
+            
+            // 현재 온도 값이 최대값을 초과하면 제한
+            const currentTemp = parseFloat(tempCounter.value) || 1.0;
+            if (currentTemp > maxTemp) {
+                tempSlider.value = maxTemp;
+                tempCounter.value = maxTemp.toFixed(2);
+                
+                // 설정 저장
+                const updatedSettings = await SettingsStorage.load();
+                const preservedApiProvider = updatedSettings.apiProvider;
+                const preservedApiKeys = updatedSettings.apiKeys || {};
+                const preservedApiModels = updatedSettings.apiModels || {};
+                updatedSettings.temperature = maxTemp;
+                updatedSettings.temp_openai = maxTemp;
+                // apiProvider, apiKeys, apiModels 보존
+                updatedSettings.apiProvider = preservedApiProvider;
+                updatedSettings.apiKeys = { ...preservedApiKeys };
+                updatedSettings.apiModels = { ...preservedApiModels };
+                await SettingsStorage.save(updatedSettings);
+                
+                // 슬라이더 이벤트 트리거하여 UI 동기화
+                tempSlider.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        }
+    }
 }
 
 /**
@@ -1175,13 +1213,25 @@ function setupSliderSync(panelContainer) {
  */
 /**
  * UI 필드에 설정 로드
+ * @param {HTMLElement} panelContainer - 패널 컨테이너
+ * @param {string} [apiProvider] - API Provider (선택적, 없으면 자동 감지)
  */
-async function loadGenerationSettings(panelContainer) {
+async function loadGenerationSettings(panelContainer, apiProvider = null) {
     // SettingsStorage - 전역 스코프에서 사용
     const settings = await SettingsStorage.load();
     
-    // API Provider 확인
-    const apiProvider = settings.apiProvider || 'openai';
+    // API Provider 확인 (매개변수 > 설정 모달 select > SettingsStorage 순서로 우선순위)
+    if (!apiProvider) {
+        // 설정 모달의 select에서 먼저 확인 (더 최신일 수 있음)
+        const chatCompletionSourceSelect = document.getElementById('chat-completion-source');
+        if (chatCompletionSourceSelect && chatCompletionSourceSelect.value) {
+            apiProvider = chatCompletionSourceSelect.value;
+        } else {
+            // SettingsStorage에서 확인
+            apiProvider = settings.apiProvider || 'openai';
+        }
+    }
+    
     const fieldMapping = getApiFieldMapping(apiProvider);
     
     // 현재 선택된 모델 확인 (모델 변경 시 컨텍스트 크기 최대값 조정용)
@@ -1339,9 +1389,30 @@ async function loadGenerationSettings(panelContainer) {
     const tempSlider = panelContainer.querySelector('#temp_openai');
     const tempCounter = panelContainer.querySelector('#temp_counter_openai');
     if (tempSlider && tempCounter) {
-        const value = settings.temperature || 1;
+        const value = settings.temperature || settings.temp_openai || 1;
         tempSlider.value = value;
         tempCounter.value = value.toFixed(2);
+        
+        // Google Vertex AI / MakerSuite 모델의 경우 온도 제한 적용
+        if (apiProvider === 'vertexai' || apiProvider === 'makersuite') {
+            const modelSelectId = `model_${apiProvider}_select`;
+            const modelSelect = document.getElementById(modelSelectId);
+            const selectedModel = modelSelect?.value || '';
+            
+            if (selectedModel) {
+                // vision/ultra/gemma 모델은 최대 온도 1.0, 나머지는 2.0
+                const maxTemp = (selectedModel.includes('vision') || selectedModel.includes('ultra') || selectedModel.includes('gemma')) ? 1.0 : 2.0;
+                tempSlider.setAttribute('max', maxTemp);
+                tempCounter.setAttribute('max', maxTemp);
+                
+                // 현재 값이 최대값을 초과하면 제한
+                const currentTemp = parseFloat(value);
+                if (currentTemp > maxTemp) {
+                    tempSlider.value = maxTemp;
+                    tempCounter.value = maxTemp.toFixed(2);
+                }
+            }
+        }
     }
     
     // Frequency Penalty
@@ -1780,8 +1851,14 @@ async function applyPresetToUI(panelContainer, preset) {
     // SettingsStorage - 전역 스코프에서 사용
     const settings = await SettingsStorage.load();
     
-    // API Provider 확인
-    const apiProvider = settings.apiProvider || 'openai';
+    // API Provider 확인 (설정 모달의 select 값을 우선 확인)
+    let apiProvider = 'openai';
+    const chatCompletionSourceSelect = document.getElementById('chat-completion-source');
+    if (chatCompletionSourceSelect && chatCompletionSourceSelect.value) {
+        apiProvider = chatCompletionSourceSelect.value;
+    } else {
+        apiProvider = settings.apiProvider || 'openai';
+    }
     
     // data-source 필드 표시/숨김 업데이트 (중요!)
     updateSourceFields(panelContainer, apiProvider);
@@ -2294,6 +2371,10 @@ async function setupPromptsPanelEvents(panelContainer) {
     
     // 설정 로드
     // 프리셋이 있으면 프리셋 설정을 먼저 적용하고, 없으면 일반 설정 로드
+    // 중요: 사용자가 설정 모달에서 변경한 API가 있으면 그것을 우선해야 함
+    const chatCompletionSourceSelectBeforePreset = document.getElementById('chat-completion-source');
+    const userSelectedApiProvider = chatCompletionSourceSelectBeforePreset?.value || null;
+    
     let presetApiProvider = null; // 프리셋에 저장된 apiProvider (있다면)
     
     if (shouldLoadPreset && presetToLoad) {
@@ -2302,25 +2383,34 @@ async function setupPromptsPanelEvents(panelContainer) {
         const currentSettings = await SettingsStorage.load();
         const { prompts: presetPrompts, prompt_order: presetPromptOrder, apiProvider, apiKeys, apiModels, ...presetSettingsWithoutPrompts } = presetToLoad;
         
-        // 프리셋에 apiProvider가 있으면 SettingsStorage에도 저장하고 토스트 알림
-        if (apiProvider && apiProvider !== currentSettings.apiProvider) {
-            presetApiProvider = apiProvider;
-            // 토스트 알림 표시 (showToast는 전역 스코프에서 사용)
-            if (typeof showToast === 'function') {
-                showToast(`프리셋 "${presetToLoad.name || 'Default'}"의 API가 "${apiProvider}"로 변경되었습니다.`, 'info');
+        // 프리셋에 apiProvider가 있고, 사용자가 설정 모달에서 다른 API를 선택하지 않았을 때만 적용
+        // 사용자가 설정 모달에서 API를 변경했다면 그것을 우선 (프리셋이 API를 덮어쓰지 않도록)
+        if (apiProvider && !userSelectedApiProvider) {
+            // 사용자가 설정 모달에서 API를 변경하지 않았고, 프리셋에 apiProvider가 있으면 적용
+            if (apiProvider !== currentSettings.apiProvider) {
+                presetApiProvider = apiProvider;
+                // 토스트 알림 표시 (showToast는 전역 스코프에서 사용)
+                if (typeof showToast === 'function') {
+                    showToast(`프리셋 "${presetToLoad.name || 'Default'}"의 API가 "${apiProvider}"로 변경되었습니다.`, 'info');
+                }
             }
         }
         
         // 프리셋에 저장된 apiProvider가 있으면 SettingsStorage에도 적용
+        // 하지만 사용자가 설정 모달에서 선택한 API가 있으면 그것을 우선
+        // 중요: 사용자가 설정 모달에서 선택한 API가 있으면 절대 프리셋의 API로 덮어쓰지 않음
+        const finalApiProvider = userSelectedApiProvider || presetApiProvider || currentSettings.apiProvider;
         const mergedForLoad = {
             ...currentSettings,
             ...presetSettingsWithoutPrompts,
             preset_settings_openai: presetToLoad.name || 'Default',
-            // 프리셋에 apiProvider가 있으면 그것으로 변경, 없으면 현재 설정 유지
-            apiProvider: presetApiProvider || currentSettings.apiProvider,
-            // apiKeys와 apiModels는 프리셋에 있으면 사용, 없으면 현재 설정 유지
-            apiKeys: apiKeys || currentSettings.apiKeys,
-            apiModels: apiModels || currentSettings.apiModels,
+            // 사용자가 설정 모달에서 선택한 API를 우선, 없으면 프리셋의 API, 그것도 없으면 현재 설정 유지
+            // 사용자가 선택한 API가 있으면 절대 덮어쓰지 않음
+            apiProvider: finalApiProvider,
+            // apiKeys와 apiModels는 프리셋을 무시하고 항상 현재 설정 유지
+            // 중요: 프리셋을 불러와도 사용자가 입력한 API 키와 모델은 유지되어야 함
+            apiKeys: currentSettings.apiKeys,
+            apiModels: currentSettings.apiModels,
         };
         
         // 프롬프트도 포함
@@ -2334,15 +2424,17 @@ async function setupPromptsPanelEvents(panelContainer) {
         await SettingsStorage.save(mergedForLoad);
         
         // API Provider 변경 이벤트 발송 (설정 모달 등 다른 UI도 업데이트되도록)
-        if (presetApiProvider) {
+        // 사용자가 설정 모달에서 선택한 API가 있으면 그것을 우선
+        const apiProviderForEvent = userSelectedApiProvider || presetApiProvider;
+        if (apiProviderForEvent) {
             window.dispatchEvent(new CustomEvent('api-provider-changed', { 
-                detail: { apiProvider: presetApiProvider } 
+                detail: { apiProvider: apiProviderForEvent } 
             }));
             
-            // 설정 모달의 select도 업데이트
+            // 설정 모달의 select도 업데이트 (사용자가 선택한 값이 있으면 그것으로, 없으면 프리셋 값으로)
             const chatCompletionSourceSelect = document.getElementById('chat-completion-source');
-            if (chatCompletionSourceSelect && Array.from(chatCompletionSourceSelect.options).some(opt => opt.value === presetApiProvider)) {
-                chatCompletionSourceSelect.value = presetApiProvider;
+            if (chatCompletionSourceSelect && Array.from(chatCompletionSourceSelect.options).some(opt => opt.value === apiProviderForEvent)) {
+                chatCompletionSourceSelect.value = apiProviderForEvent;
                 // SettingsManager가 있다면 UI도 업데이트
                 if (window.settingsManager) {
                     window.settingsManager.toggleProviderSpecificSettings();
@@ -2357,7 +2449,33 @@ async function setupPromptsPanelEvents(panelContainer) {
         }
     }
     
-    await loadGenerationSettings(panelContainer);
+    // API Provider에 따라 필드 표시/숨김 업데이트
+    // 프롬프트 패널이 열릴 때 최신 API Provider 확인
+    // 중요: 설정 모달의 select 값이 가장 최신이므로 항상 우선해야 함
+    // (사용자가 설정 모달에서 변경한 API가 반영되어야 함)
+    // loadGenerationSettings 호출 전에 최신 API를 확인해야 함
+    let apiProviderForFields = 'openai';
+    
+    // 설정 모달의 select 값을 우선 확인 (사용자가 선택한 최신 값)
+    const chatCompletionSourceSelect = document.getElementById('chat-completion-source');
+    if (chatCompletionSourceSelect && chatCompletionSourceSelect.value) {
+        apiProviderForFields = chatCompletionSourceSelect.value;
+    } else {
+        // select 값이 없으면 SettingsStorage에서 확인
+        const currentSettingsAfterPreset = await SettingsStorage.load();
+        apiProviderForFields = currentSettingsAfterPreset.apiProvider || 'openai';
+    }
+    
+    // 필드 업데이트 (중요: 모든 data-source 요소 표시/숨김)
+    // loadGenerationSettings 호출 전에 먼저 필드를 올바른 API로 표시해야 함
+    if (panelContainer) {
+        updateSourceFields(panelContainer, apiProviderForFields);
+    } else {
+        console.error('[setupPromptsPanelEvents] panelContainer가 null입니다!');
+    }
+    
+    // 최신 API Provider로 설정 로드 (필드 업데이트 후)
+    await loadGenerationSettings(panelContainer, apiProviderForFields);
     
     // 프리셋이 이미 적용된 경우, loadGenerationSettings 이후에 UI 업데이트 (체크박스 등)
     if (shouldLoadPreset && presetToLoad) {
@@ -2368,31 +2486,24 @@ async function setupPromptsPanelEvents(panelContainer) {
     const handleApiProviderChange = async () => {
         // SettingsStorage는 이미 위에서 import됨
         const settings = await SettingsStorage.load();
-        const apiProvider = settings.apiProvider || 'openai';
+        let apiProvider = settings.apiProvider || 'openai';
+        
+        // 설정 모달의 select에서도 확인 (더 최신일 수 있음)
+        const chatCompletionSourceSelectInHandler = document.getElementById('chat-completion-source');
+        if (chatCompletionSourceSelectInHandler && chatCompletionSourceSelectInHandler.value) {
+            apiProvider = chatCompletionSourceSelectInHandler.value;
+        }
         
         // 필드 업데이트
         if (panelContainer) {
-    updateSourceFields(panelContainer, apiProvider);
+            updateSourceFields(panelContainer, apiProvider);
     
             // 컨텍스트 크기 업데이트도 함께 수행
-    await handleModelChange(panelContainer, apiProvider);
+            await handleModelChange(panelContainer, apiProvider);
         } else {
             console.warn('[promptsTemplatesPanel.handleApiProviderChange] panelContainer가 null입니다.');
         }
     };
-    
-    // API Provider에 따라 필드 표시/숨김 업데이트
-    // 프리셋을 불러올 때는 프리셋에 저장된 apiProvider로 SettingsStorage가 이미 업데이트되었음
-    const currentSettingsAfterPreset = await SettingsStorage.load();
-    const apiProviderForFields = currentSettingsAfterPreset.apiProvider || 'openai';
-    
-    // 필드 업데이트 (중요: 모든 data-source 요소 표시/숨김)
-    // 패널이 열릴 때 반드시 호출되어야 함
-    if (panelContainer) {
-        updateSourceFields(panelContainer, apiProviderForFields);
-    } else {
-        console.error('[setupPromptsPanelEvents] panelContainer가 null입니다!');
-    }
     
     // 초기 모델 변경 핸들러 호출 (컨텍스트 크기 최대값 설정용)
     await handleModelChange(panelContainer, apiProviderForFields);
@@ -2407,23 +2518,42 @@ async function setupPromptsPanelEvents(panelContainer) {
         // applyPresetSettings 오버라이드하여 UI에 적용
         const originalApplyPresetSettings = manager.applyPresetSettings.bind(manager);
         manager.applyPresetSettings = async (preset) => {
+            // 중요: 사용자가 설정 모달에서 선택한 API를 우선 확인
+            const chatCompletionSourceSelectForPreset = document.getElementById('chat-completion-source');
+            const userSelectedApiProvider = chatCompletionSourceSelectForPreset?.value || null;
+            
             // 프리셋에 저장된 apiProvider 확인 (originalApplyPresetSettings 호출 전에)
             const presetApiProviderFromPreset = preset?.apiProvider;
             const currentSettingsBefore = await SettingsStorage.load();
             const currentApiProviderBefore = currentSettingsBefore.apiProvider || 'openai';
             
-            // originalApplyPresetSettings 호출 (이미 apiProvider를 저장했을 수 있음)
-            await originalApplyPresetSettings(preset);
+            // 사용자가 설정 모달에서 선택한 API가 있으면 프리셋의 apiProvider를 제거하여 덮어쓰지 않도록 함
+            const presetToApply = { ...preset };
+            if (userSelectedApiProvider && presetApiProviderFromPreset) {
+                // 사용자가 선택한 API를 우선하기 위해 프리셋의 apiProvider를 제거
+                delete presetToApply.apiProvider;
+            }
+            
+            // originalApplyPresetSettings 호출 (프리셋의 apiProvider가 제거된 상태로 호출)
+            await originalApplyPresetSettings(presetToApply);
             
             // originalApplyPresetSettings 호출 후 SettingsStorage 다시 확인
             const currentSettingsAfter = await SettingsStorage.load();
             const currentApiProviderAfter = currentSettingsAfter.apiProvider || 'openai';
             
-            // 프리셋에 저장된 apiProvider가 있고 변경되었으면 토스트 알림 및 UI 업데이트
-            if (presetApiProviderFromPreset && presetApiProviderFromPreset !== currentApiProviderBefore) {
-                // originalApplyPresetSettings에서 이미 저장했는지 확인
-                // 저장되었더라도 토스트와 UI 업데이트는 여기서 처리
-                
+            // 최종 API Provider 결정: 사용자가 설정 모달에서 선택한 값이 있으면 그것을 우선
+            const finalApiProvider = userSelectedApiProvider || presetApiProviderFromPreset || currentApiProviderAfter;
+            
+            // 사용자가 설정 모달에서 선택한 API가 있으면 그것으로 SettingsStorage 업데이트
+            if (userSelectedApiProvider && userSelectedApiProvider !== currentApiProviderAfter) {
+                await SettingsStorage.save({
+                    ...currentSettingsAfter,
+                    apiProvider: userSelectedApiProvider
+                });
+            }
+            
+            // 프리셋에 저장된 apiProvider가 있고, 사용자가 설정 모달에서 선택하지 않았고, 변경되었으면 토스트 알림
+            if (presetApiProviderFromPreset && !userSelectedApiProvider && presetApiProviderFromPreset !== currentApiProviderBefore) {
                 // 토스트 알림 표시
                 if (typeof showToast === 'function') {
                     showToast(`프리셋 "${preset.name || 'Default'}"의 API가 "${presetApiProviderFromPreset}"로 변경되었습니다.`, 'info');
@@ -2435,25 +2565,19 @@ async function setupPromptsPanelEvents(panelContainer) {
                 }));
                 
                 // 설정 모달의 select도 업데이트
-                const chatCompletionSourceSelect = document.getElementById('chat-completion-source');
-                if (chatCompletionSourceSelect && Array.from(chatCompletionSourceSelect.options).some(opt => opt.value === presetApiProviderFromPreset)) {
-                    chatCompletionSourceSelect.value = presetApiProviderFromPreset;
+                if (chatCompletionSourceSelectForPreset && Array.from(chatCompletionSourceSelectForPreset.options).some(opt => opt.value === presetApiProviderFromPreset)) {
+                    chatCompletionSourceSelectForPreset.value = presetApiProviderFromPreset;
                     // SettingsManager가 있다면 UI도 업데이트
                     if (window.settingsManager) {
                         window.settingsManager.toggleProviderSpecificSettings();
                         window.settingsManager.updateModelOptions();
                     }
                 }
-                
-                // 필드 업데이트 (프리셋의 apiProvider로)
-                updateSourceFields(panelContainer, presetApiProviderFromPreset);
-                await handleModelChange(panelContainer, presetApiProviderFromPreset);
-            } else {
-                // 프리셋에 apiProvider가 없거나 현재와 같으면 현재 설정으로 필드 업데이트
-                const apiProviderForFields = currentApiProviderAfter;
-                updateSourceFields(panelContainer, apiProviderForFields);
-                await handleModelChange(panelContainer, apiProviderForFields);
             }
+            
+            // 필드 업데이트 (사용자가 선택한 값 또는 프리셋의 값 또는 현재 설정)
+            updateSourceFields(panelContainer, finalApiProvider);
+            await handleModelChange(panelContainer, finalApiProvider);
             
             // UI 업데이트는 항상 호출되도록 보장
             await applyPresetToUI(panelContainer, preset);
@@ -3019,12 +3143,12 @@ async function setupPromptsPanelEvents(panelContainer) {
         }
     
     // 설정 모달의 chat-completion-source select 변경 감지
-    const chatCompletionSourceSelect = document.getElementById('chat-completion-source');
-    if (chatCompletionSourceSelect) {
+    const chatCompletionSourceSelectForEvent = document.getElementById('chat-completion-source');
+    if (chatCompletionSourceSelectForEvent) {
         // 중복 등록 방지
-        if (!chatCompletionSourceSelect._hasPromptsChangeHandler) {
-            chatCompletionSourceSelect._hasPromptsChangeHandler = true;
-        chatCompletionSourceSelect.addEventListener('change', async () => {
+        if (!chatCompletionSourceSelectForEvent._hasPromptsChangeHandler) {
+            chatCompletionSourceSelectForEvent._hasPromptsChangeHandler = true;
+        chatCompletionSourceSelectForEvent.addEventListener('change', async () => {
                 // SettingsManager의 change 핸들러가 saveSettings를 호출하므로
                 // 여기서는 저장 후 바로 업데이트
                 // 짧은 지연을 주어 SettingsManager의 saveSettings가 완료되도록 함

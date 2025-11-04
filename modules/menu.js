@@ -76,16 +76,28 @@ class MenuManager {
         
         // closing 클래스 제거
         this.elements.sideMenu.classList.remove('closing');
+        
+        // 오버레이 강제 표시 (항상 표시)
+        // 다른 모달이 있든 없든 메뉴를 열 때는 오버레이가 필요함
         this.elements.overlay.classList.remove('closing', 'hidden');
+        this.elements.overlay.style.pointerEvents = '';
+        
+        // 메뉴가 열리는 중임을 표시 (오버레이 클릭 무시용)
+        this.elements.sideMenu.dataset.opening = 'true';
+        
         // 포인터 이벤트 복원
         this.elements.sideMenu.style.pointerEvents = '';
-        this.elements.overlay.style.pointerEvents = '';
         
         // hidden 클래스 제거 - display: none이 아니므로 visibility만 변경
         // 브라우저가 리플로우하도록 한 프레임 대기 후 hidden 제거
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
                 this.elements.sideMenu.classList.remove('hidden');
+                
+                // 메뉴가 완전히 열린 후 오버레이 클릭 허용 (짧은 지연 후)
+                setTimeout(() => {
+                    delete this.elements.sideMenu.dataset.opening;
+                }, 300);
             });
         });
     }

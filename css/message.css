@@ -347,6 +347,11 @@
     background: rgba(255, 255, 255, 0.2);
 }
 
+.message-document-btn:hover:not(:disabled) {
+    background: rgba(139, 92, 246, 0.3);
+    color: rgba(139, 92, 246, 1);
+}
+
 .message-edit-btn:hover:not(:disabled) {
     background: rgba(59, 130, 246, 0.3);
 }
@@ -566,4 +571,137 @@
     box-sizing: border-box;
     overflow: hidden; /* 스크롤 완전히 제거 */
     background-color: transparent !important;
+}
+
+/* 프롬프트 정보 모달 스타일 */
+.prompt-info-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
+    z-index: 10001; /* overlay보다 높게 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-md);
+    box-sizing: border-box;
+}
+
+.prompt-info-modal.closing {
+    animation: modalSlideOut var(--transition-normal) forwards;
+    pointer-events: none;
+}
+
+.prompt-info-modal:not(.hidden):not(.closing) {
+    animation: modalSlideIn var(--transition-normal);
+}
+
+#prompt-info-modal-overlay {
+    z-index: 10000; /* 모달보다 낮게 */
+}
+
+.prompt-info-modal .modal-content {
+    background: var(--bg-secondary);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    width: 100%;
+    max-width: 600px;
+    max-height: calc(100dvh - 2 * var(--spacing-md));
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--shadow-lg);
+    box-sizing: border-box;
+    overflow: hidden; /* 모달 자체 스크롤 방지 */
+}
+
+.prompt-info-modal .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    flex-shrink: 0; /* 헤더는 고정 */
+}
+
+.prompt-info-modal .modal-header h2 {
+    margin: 0;
+    font-size: 1.2em;
+    color: var(--text-primary);
+}
+
+.prompt-info-modal .modal-body {
+    padding: var(--spacing-lg);
+    overflow-y: auto; /* 이 영역만 스크롤 가능 */
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-lg);
+    min-height: 0; /* flex 아이템이 부모 높이를 초과하지 않도록 */
+}
+
+.prompt-info-section {
+    background: var(--bg-tertiary);
+    border-radius: var(--border-radius-md);
+    padding: var(--spacing-md);
+    border: 1px solid var(--border-color);
+    flex-shrink: 0; /* 정보 섹션은 고정 크기 */
+}
+
+.prompt-info-title {
+    font-size: 1em;
+    color: var(--text-primary);
+    margin-top: 0;
+    margin-bottom: var(--spacing-sm);
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.1);
+    padding-bottom: var(--spacing-xs);
+}
+
+.prompt-info-content {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--spacing-xs) var(--spacing-sm);
+    font-size: 0.9em;
+}
+
+.prompt-info-label {
+    color: var(--text-secondary);
+    font-weight: bold;
+}
+
+.prompt-info-value {
+    color: var(--text-primary);
+    word-break: break-all;
+}
+
+.prompt-section {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    min-height: 0; /* flex 아이템이 부모 높이를 초과하지 않도록 */
+}
+
+.prompt-content-container {
+    background: var(--bg-code);
+    border-radius: var(--border-radius-md);
+    padding: var(--spacing-md);
+    border: 1px solid var(--border-color);
+    flex-grow: 1;
+    overflow-y: auto; /* 프롬프트 내용만 스크롤 가능 */
+    font-size: 0.85em;
+    line-height: 1.4;
+    color: var(--text-code);
+    white-space: pre-wrap; /* 줄바꿈 유지 */
+    word-wrap: break-word;
+    min-height: 200px;
+    max-height: 400px; /* 최대 높이 제한 */
+}
+
+.prompt-text {
+    margin: 0;
+    padding: 0;
 }

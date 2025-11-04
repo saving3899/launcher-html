@@ -426,16 +426,14 @@ class PresetManager {
             preset_settings_openai: preset.name || 'Default',
         };
         
-        // apiProvider, apiKeys, apiModels 처리 (프리셋에 있으면 사용)
+        // apiProvider, apiKeys, apiModels 처리
         if (presetApiProvider) {
             mergedSettings.apiProvider = presetApiProvider;
         }
-        if (presetApiKeys) {
-            mergedSettings.apiKeys = presetApiKeys;
-        }
-        if (presetApiModels) {
-            mergedSettings.apiModels = presetApiModels;
-        }
+        // apiKeys와 apiModels는 프리셋을 무시하고 항상 현재 설정 유지
+        // 중요: 프리셋을 불러와도 사용자가 입력한 API 키와 모델은 유지되어야 함
+        mergedSettings.apiKeys = restCurrentSettings.apiKeys;
+        mergedSettings.apiModels = restCurrentSettings.apiModels;
         
         // prompts와 prompt_order 처리
         // Default 프리셋인 경우:
