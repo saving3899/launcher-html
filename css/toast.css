@@ -1,0 +1,212 @@
+/* ============================================
+   토스트 알림 스타일
+   ============================================ */
+
+/* 토스트 컨테이너 */
+.toast-container {
+    position: fixed;
+    top: var(--spacing-md);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    width: 100%;
+    max-width: 500px;
+    pointer-events: none;
+}
+
+/* 토스트 기본 스타일 */
+.toast {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow-md);
+    opacity: 0;
+    transform: translateY(-20px);
+    transition: opacity var(--transition-normal) ease, transform var(--transition-normal) ease;
+    pointer-events: auto;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    overflow: hidden;
+    position: relative;
+}
+
+.toast-wrapper {
+    padding: var(--spacing-md) var(--spacing-lg);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-md);
+    min-height: 48px;
+}
+
+.toast.toast-show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.toast.toast-closing {
+    opacity: 0;
+    transform: translateY(-20px);
+}
+
+.toast-content {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-md);
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+}
+
+.toast-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+    margin-top: 2px;
+    line-height: 1;
+}
+
+.toast-message {
+    flex: 1;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-primary);
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    padding: 0;
+    text-align: left;
+}
+
+.toast-close {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: var(--spacing-xs);
+    border-radius: var(--border-radius-sm);
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin-left: var(--spacing-sm);
+}
+
+.toast-close:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.toast-close:active {
+    transform: scale(0.95);
+}
+
+/* ============================================
+   토스트 타입별 스타일
+   ============================================ */
+
+/* 에러 토스트 */
+.toast-error {
+    border-left: 4px solid var(--error-color);
+}
+
+.toast-error .toast-icon {
+    color: var(--error-color);
+}
+
+/* 경고 토스트 */
+.toast-warning {
+    border-left: 4px solid #ffa500;
+}
+
+.toast-warning .toast-icon {
+    color: #ffa500;
+}
+
+/* 성공 토스트 */
+.toast-success {
+    border-left: 4px solid var(--success-color);
+}
+
+.toast-success .toast-icon {
+    color: var(--success-color);
+}
+
+/* 정보 토스트 (성공과 동일하게 처리) */
+.toast-info {
+    border-left: 4px solid var(--success-color);
+}
+
+.toast-info .toast-icon {
+    color: var(--success-color);
+}
+
+/* ============================================
+   프로그래스 바 (성공/정보 토스트)
+   ============================================ */
+
+/* 프로그래스 바 컨테이너 */
+.toast-success .toast-progress-bar,
+.toast-info .toast-progress-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: rgba(76, 175, 80, 0.2);
+    overflow: hidden;
+}
+
+/* 프로그래스 바 진행 표시 */
+.toast-success .toast-progress-fill,
+.toast-info .toast-progress-fill {
+    height: 100%;
+    background: var(--success-color);
+    width: 0%;
+    transition: width 0.1s linear;
+}
+
+/* 일시정지 상태 (호버 시) */
+.toast-success.toast-paused .toast-progress-fill,
+.toast-info.toast-paused .toast-progress-fill {
+    transition: none;
+}
+
+/* ============================================
+   오류 코드 토스트 스타일
+   ============================================ */
+
+/* 에러 코드 토스트 (불투명) */
+.toast-error-code {
+    border-left: 4px solid #dc3545;
+    background: var(--bg-secondary);
+}
+
+.toast-error-code .toast-icon {
+    color: #dc3545;
+}
+
+.toast-error-code .toast-message strong {
+    color: #dc3545;
+    font-weight: 600;
+}
+
+/* 경고 코드 토스트 (불투명) */
+.toast-warning-code {
+    border-left: 4px solid #ffa500;
+    background: var(--bg-secondary);
+}
+
+.toast-warning-code .toast-icon {
+    color: #ffa500;
+}
+
+.toast-warning-code .toast-message strong {
+    color: #ffa500;
+    font-weight: 600;
+}
+

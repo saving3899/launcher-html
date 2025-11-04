@@ -1,0 +1,64 @@
+/* CSS 변수 정의 */
+
+:root {
+    /* 색상 변수 - 밝고 현대적인 라이트 모드 */
+    --bg-primary: #fafafa;
+    --bg-secondary: #ffffff;
+    --bg-tertiary: #f5f5f5;
+    --bg-pattern: #fefefe;
+    --bg-message-user: #ffffff;
+    --bg-message-assistant: #2d2d2d;
+    --text-primary: #000000;
+    --text-secondary: #666666;
+    --text-tertiary: #999999;
+    --border-color: rgba(0, 0, 0, 0.1);
+    --accent-yellow: #ffd700;
+    --accent-pink: #ff69b4;
+    --accent-green: #4caf50;
+    --accent-color: #ffd700;
+    --accent-hover: #ffed4e;
+    --accent-light: rgba(255, 215, 0, 0.1);
+    --error-color: #ff4757;
+    --success-color: #4caf50;
+    
+    /* 간격 */
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 12px;
+    --spacing-lg: 16px;
+    --spacing-xl: 20px;
+    --spacing-2xl: 24px;
+    --spacing-3xl: 32px;
+    
+    /* 크기 */
+    --top-bar-height: 64px;
+    --input-area-height: auto;
+    --icon-size: 24px;
+    --border-radius: 20px;
+    --border-radius-sm: 12px;
+    --border-radius-lg: 24px;
+    
+    /* 그림자 */
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.15);
+    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.2);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.3);
+    --shadow-message: 0 2px 12px rgba(0, 0, 0, 0.15);
+    
+    /* 애니메이션 */
+    --transition-fast: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-normal: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 다크 모드 (기본) */
+@media (prefers-color-scheme: light) {
+    :root {
+        --bg-primary: #ffffff;
+        --bg-secondary: #f5f5f5;
+        --bg-tertiary: #e0e0e0;
+        --text-primary: #1a1a1a;
+        --text-secondary: #666;
+        --border-color: #d0d0d0;
+    }
+}
+

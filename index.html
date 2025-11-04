@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<!-- 
+    모든 모듈은 전역 스코프로 로드되므로 file:// 프로토콜에서도 작동합니다.
+    HTML 파일을 브라우저에서 직접 열 수 있습니다.
+-->
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>𝙂𝙂𝘼𝙉𝙂</title>
+    <link rel="apple-touch-icon" sizes="57x57" href="public/apple-icon-57x57.png">
+    <link rel="apple-touch-icon" sizes="60x60" href="public/apple-icon-60x60.png">
+    <link rel="apple-touch-icon" sizes="72x72" href="public/apple-icon-72x72.png">
+    <link rel="apple-touch-icon" sizes="76x76" href="public/apple-icon-76x76.png">
+    <link rel="apple-touch-icon" sizes="114x114" href="public/apple-icon-114x114.png">
+    <link rel="apple-touch-icon" sizes="120x120" href="public/apple-icon-120x120.png">
+    <link rel="apple-touch-icon" sizes="144x144" href="public/apple-icon-144x144.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="public/apple-icon-152x152.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="public/apple-icon-180x180.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="public/android-icon-192x192.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="public/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="96x96" href="public/favicon-96x96.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="public/favicon-16x16.png">
+    <!-- manifest.json은 PWA 기능이 필요할 때만 사용 -->
+    <!-- <link rel="manifest" href="manifest.json"> -->
+    <meta name="msapplication-TileColor" content="#f5f5f5">
+    <meta name="msapplication-TileImage" content="public/ms-icon-144x144.png">
+    <!-- 테마 컬러 (Android Chrome 등) -->
+    <meta name="theme-color" content="#f5f5f5" media="(prefers-color-scheme: light)">
+    <!-- iOS Safari 상태 표시줄 스타일 (홈 화면 추가 모드) -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="𝙂𝙂𝘼𝙉𝙂">
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+        integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA=="
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" />
+    <!-- tiktoken for accurate token counting (supports Korean and other languages) -->
+    <!-- js-tiktoken: 브라우저에서 직접 사용 가능한 JavaScript 구현 -->
+    <link rel="stylesheet" href="src/style.css">
+    <link rel="stylesheet" href="css/promptmanager.css">
+    <link rel="stylesheet" href="css/prompts-panel.css">
+    <link rel="stylesheet" href="css/toast.css">
+</head>
+
+<body>
+    <!-- 사이드 메뉴 -->
+    <div id="side-menu" class="side-menu hidden">
+        <div class="side-menu-header">
+            <h2>메뉴</h2>
+            <button id="close-menu" class="close-btn">&times;</button>
+        </div>
+        <div class="side-menu-content">
+            <!-- 채팅 메뉴 -->
+            <button class="menu-item menu-group" data-menu-group="chat-menu">
+                <span>채팅 메뉴</span>
+                <span class="menu-arrow">▶</span>
+            </button>
+            <div class="menu-submenu" data-submenu="chat-menu" style="display: none;">
+                <button class="menu-item menu-subitem" data-panel="characters">캐릭터</button>
+                <button class="menu-item menu-subitem" data-panel="chats">채팅</button>
+                <button class="menu-item menu-subitem" data-panel="personas">페르소나</button>
+            </div>
+
+            <!-- 채팅 확장 요소 -->
+            <button class="menu-item menu-group" data-menu-group="chat-extensions">
+                <span>채팅 확장 요소</span>
+                <span class="menu-arrow">▶</span>
+            </button>
+            <div class="menu-submenu" data-submenu="chat-extensions" style="display: none;">
+                <button class="menu-item menu-subitem" data-panel="world-info">월드인포</button>
+                <button class="menu-item menu-subitem" data-panel="quick-reply">빠른 답변</button>
+                <button class="menu-item menu-subitem" data-panel="regex">정규식</button>
+                <button class="menu-item menu-subitem" data-panel="status-bar-choice">상태창/선택지</button>
+                <button class="menu-item menu-subitem" data-panel="ai-loading">AI 로딩</button>
+            </div>
+
+            <!-- 프롬프트 -->
+            <button class="menu-item menu-group" data-menu-group="prompts">
+                <span>프롬프트</span>
+                <span class="menu-arrow">▶</span>
+            </button>
+            <div class="menu-submenu" data-submenu="prompts" style="display: none;">
+                <button class="menu-item menu-subitem" data-panel="prompts">프롬프트</button>
+                <button class="menu-item menu-subitem" data-panel="autofill-prompt">대필 지시문</button>
+            </div>
+
+            <button class="menu-item" data-panel="settings">API 설정</button>
+
+            <!-- 앱 설정 -->
+            <button class="menu-item menu-group" data-menu-group="app-settings">
+                <span>앱 설정</span>
+                <span class="menu-arrow">▶</span>
+            </button>
+            <div class="menu-submenu" data-submenu="app-settings" style="display: none;">
+                <button class="menu-item menu-subitem" data-panel="chat-processing">채팅 처리</button>
+                <button class="menu-item menu-subitem" data-panel="data-management">데이터 관리</button>
+                <button class="menu-item menu-subitem" data-panel="other-settings">기타 설정</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 상단바 -->
+    <div class="top-bar">
+        <div class="top-bar-btn-wrap">
+            <button id="home-btn" class="top-bar-btn home-btn" title="채팅 나가기">
+                <i class="fa-solid fa-house"></i>
+            </button>
+            <div class="char-info" id="char-info" style="display: none;">
+                <span id="char-name" class="char-name-text">캐릭터를 선택하세요</span>
+                <div class="char-info-buttons">
+                    <button class="char-info-btn" id="char-info-new-chat" title="새 채팅">
+                        <i class="fa-solid fa-plus-circle"></i>
+                    </button>
+                    <button class="char-info-btn" id="char-info-chat-list" title="채팅 목록">
+                        <i class="fa-solid fa-comments"></i>
+                    </button>
+                    <button class="char-info-btn" id="char-info-profile" title="캐릭터 프로필">
+                        <i class="fa-solid fa-user"></i>
+                    </button>
+                    <button class="char-info-btn" id="char-info-manage" title="캐릭터 관리">
+                        <i class="fa-solid fa-users"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="home-info" id="home-info">
+                <span>HOME</span>
+            </div>
+            <button id="menu-toggle" class="menu-toggle">☰</button>
+        </div>
+    </div>
+
+    <!-- 메인 콘텐츠 영역 -->
+    <div class="main-content">
+        <!-- 홈화면 영역 (캐릭터 미선택 상태) -->
+        <div id="home-screen" class="home-screen">
+            <!-- 홈화면 내용은 여기에 추가 -->
+        </div>
+
+        <!-- 채팅 영역 -->
+        <div id="chat-container" class="chat-container hidden">
+            <div id="chat-messages" class="chat-messages"></div>
+            <div class="chat-input-container">
+                <div class="plus-btn-wrapper" style="position: relative;">
+                    <button id="plus-btn" class="plus-btn" title="추가">
+                        <i class="fa-solid fa-plus"></i>
+                    </button>
+                    <div id="plus-menu" class="plus-menu hidden">
+                        <button id="plus-menu-new-chat" class="plus-menu-item">
+                            <i class="fa-solid fa-plus-circle"></i>
+                            <span>새 채팅</span>
+                        </button>
+                        <button id="plus-menu-chat-list" class="plus-menu-item">
+                            <i class="fa-solid fa-comments"></i>
+                            <span>채팅 목록</span>
+                        </button>
+                        <button id="plus-menu-profile" class="plus-menu-item">
+                            <i class="fa-solid fa-user"></i>
+                            <span>캐릭터 프로필</span>
+                        </button>
+                        <button id="plus-menu-exit-chat" class="plus-menu-item">
+                            <i class="fa-solid fa-sign-out-alt"></i>
+                            <span>채팅 나가기</span>
+                        </button>
+                    </div>
+                </div>
+                <textarea id="message-input" class="chat-input" placeholder="메시지를 입력하세요..." rows={1}></textarea>
+                <button id="autofill-btn" class="autofill-btn" title="대필">
+                    <i class="fa-solid fa-pencil"></i>
+                </button>
+                <button id="send-btn" class="send-btn">
+                    <i class="fa-solid fa-play" id="send-btn-icon"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- 패널 컨테이너 -->
+        <div id="panel-container" class="panel-container hidden"></div>
+    </div>
+
+    <!-- 설정 모달 -->
+    <div id="settings-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>설정</h2>
+                <button id="close-settings" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <section class="settings-section">
+                    <h3>AI API 설정</h3>
+
+                    <!-- Chat Completion Source 선택 -->
+                    <div class="form-group">
+                        <label for="chat-completion-source">Chat Completion Source</label>
+                        <select id="chat-completion-source">
+                            <!-- 프록시 없이 사용 가능한 API (권장) -->
+                            <optgroup label="권장 (프록시 불필요)">
+                                <option value="claude">Claude (Anthropic)</option>
+                                <option value="makersuite">Google AI Studio (Gemini)</option>
+                                <option value="vertexai">Google Vertex AI</option>
+                            </optgroup>
+                            <!-- 프록시가 필요한 API (현재 숨김, 나중에 사용 가능) -->
+                            <optgroup label="프록시 필요" class="hidden-api-options">
+                                <option value="openai">OpenAI</option>
+                                <option value="custom">Custom (OpenAI-compatible)</option>
+                                <option value="ai21">AI21</option>
+                                <option value="aimlapi">AI/ML API</option>
+                                <option value="azure_openai">Azure OpenAI</option>
+                                <option value="cohere">Cohere</option>
+                                <option value="deepseek">DeepSeek</option>
+                                <option value="electronhub">Electron Hub</option>
+                                <option value="fireworks">Fireworks AI</option>
+                                <option value="groq">Groq</option>
+                                <option value="mistralai">MistralAI</option>
+                                <option value="moonshot">Moonshot AI</option>
+                                <option value="nanogpt">NanoGPT</option>
+                                <option value="openrouter">OpenRouter</option>
+                                <option value="perplexity">Perplexity</option>
+                                <option value="pollinations">Pollinations</option>
+                                <option value="xai">xAI (Grok)</option>
+                                <option value="zai">Z.AI</option>
+                            </optgroup>
+                        </select>
+                    </div>
+
+                    <!-- OpenAI Form -->
+                    <form id="openai_form" data-source="openai" action="javascript:void(null);">
+                        <div class="form-group">
+                            <label for="api_key_openai">OpenAI API Key</label>
+                            <div>
+                                <a id="openai_api_usage" href="https://platform.openai.com/account/usage"
+                                    target="_blank">View API Usage Metrics</a>
+                            </div>
+                            <div>
+                                <small>1. Follow <a href="https://docs.sillytavern.app/usage/api-connections/openai/"
+                                        target="_blank">these directions</a> to get your OpenAI API key.</small><br>
+                                <small>2. Enter it in the box below:</small>
+                            </div>
+                            <div class="flex-container">
+                                <input id="api_key_openai" name="api_key_openai" class="text-input flex1"
+                                    type="password" autocomplete="off" placeholder="sk-...">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_openai_select">OpenAI Model</label>
+                            <select id="model_openai_select">
+                                <option value="">모델을 선택하세요</option>
+                            </select>
+                            <label for="openai_bypass_status_check" class="checkbox_label">
+                                <input id="openai_bypass_status_check" type="checkbox" />
+                                <span>Bypass API status check</span>
+                            </label>
+                            <label for="openai_show_external_models" class="checkbox_label">
+                                <input id="openai_show_external_models" type="checkbox" />
+                                <span>Show "External" models (provided by API)</span>
+                            </label>
+                        </div>
+                    </form>
+
+                    <!-- Claude Form -->
+                    <form id="claude_form" data-source="claude" action="javascript:void(null);">
+                        <div class="form-group">
+                            <label for="api_key_claude">Claude API Key</label>
+                            <div class="flex-container">
+                                <input id="api_key_claude" name="api_key_claude" class="text-input flex1"
+                                    type="password" autocomplete="off" placeholder="sk-ant-...">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_claude_select">Claude Model</label>
+                            <select id="model_claude_select">
+                                <option value="">모델을 선택하세요</option>
+                            </select>
+                        </div>
+                    </form>
+
+                    <!-- OpenRouter Form -->
+                    <form id="openrouter_form" data-source="openrouter" action="javascript:void(null);">
+                        <div class="form-group">
+                            <label for="api_key_openrouter">OpenRouter API Key</label>
+                            <div class="flex-container">
+                                <input id="api_key_openrouter" name="api_key_openrouter" class="text-input flex1"
+                                    type="password" autocomplete="off" placeholder="sk-or-...">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_openrouter_select">OpenRouter Model</label>
+                            <select id="model_openrouter_select">
+                                <option value="">-- Connect to the API --</option>
+                            </select>
+                        </div>
+                    </form>
+
+                    <!-- AI21 Form -->
+                    <form id="ai21_form" data-source="ai21" action="javascript:void(null);">
+                        <div class="form-group">
+                            <label for="api_key_ai21">AI21 API Key</label>
+                            <div class="flex-container">
+                                <input id="api_key_ai21" name="api_key_ai21" class="text-input flex1" type="password"
+                                    autocomplete="off">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_ai21_select">AI21 Model</label>
+                            <select id="model_ai21_select">
+                                <option value="">모델을 선택하세요</option>
+                            </select>
+                        </div>
+                    </form>
+
+                    <!-- Google AI Studio Form -->
+                    <form id="makersuite_form" data-source="makersuite" action="javascript:void(null);">
+                        <div class="form-group">
+                            <label for="api_key_makersuite">Google AI Studio API Key</label>
+                            <div class="flex-container">
+                                <input id="api_key_makersuite" name="api_key_makersuite" class="text-input flex1"
+                                    type="password" autocomplete="off">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_makersuite_select">Google Model</label>
+                            <select id="model_makersuite_select">
+                                <option value="">모델을 선택하세요</option>
+                            </select>
+                        </div>
+                    </form>
+
+                    <!-- Google Vertex AI Form -->
+                    <div id="vertexai_form" data-source="vertexai">
+                        <h4>Google Vertex AI Configuration</h4>
+
+                        <!-- Authentication Mode Selection -->
+                        <div class="form-group">
+                            <label for="vertexai_auth_mode">Authentication Mode:</label>
+                            <select id="vertexai_auth_mode" class="text-input">
+                                <option value="express">Express Mode (API Key)</option>
+                                <option value="full">Full Version (Service Account)</option>
+                            </select>
+                        </div>
+
+                        <!-- Express Mode Configuration -->
+                        <div id="vertexai_express_config" class="vertexai-auth-section" data-mode="express">
+                            <h4>Google Vertex AI Configuration <a
+                                    href="https://cloud.google.com/vertex-ai/generative-ai/docs/start/express-mode/overview"
+                                    target="_blank" rel="noopener noreferrer">(Express mode)</a></h4>
+
+                            <!-- API Key -->
+                            <div class="form-group">
+                                <label for="api_key_vertexai">API Key:</label>
+                                <div class="flex-container">
+                                    <input id="api_key_vertexai" name="api_key_vertexai" class="text-input flex1"
+                                        type="password" autocomplete="off">
+                                </div>
+                                <small class="form-hint">For privacy reasons, your API key will be hidden after you
+                                    click 'Connect'.</small>
+                            </div>
+
+                            <!-- Project ID -->
+                            <div class="form-group">
+                                <label for="vertexai_express_project_id">Project ID:</label>
+                                <input id="vertexai_express_project_id" name="vertexai_express_project_id"
+                                    class="text-input" type="text" autocomplete="off"
+                                    placeholder="Enter your Project ID">
+                                <small class="form-hint">Project ID is only required when selecting regions other than
+                                    the default (us-central1). You can find this in a model 404 error message.</small>
+                            </div>
+                        </div>
+
+                        <!-- Full Version Configuration -->
+                        <div id="vertexai_full_config" class="vertexai-auth-section" data-mode="full"
+                            style="display: none;">
+                            <h4>Service Account Configuration <a
+                                    href="https://cloud.google.com/vertex-ai/docs/authentication" target="_blank"
+                                    rel="noopener noreferrer">ⓘ</a></h4>
+
+                            <!-- Service Account JSON Content -->
+                            <div class="form-group">
+                                <label for="vertexai_service_account_json">Service Account JSON Content:</label>
+                                <div id="vertexai_service_account_status" class="info-block" style="display: none;">
+                                    <span id="vertexai_service_account_info"></span>
+                                </div>
+                                <div class="flex-container">
+                                    <input id="vertexai_service_account_json" name="vertexai_service_account_json"
+                                        class="text-input flex1" type="text" autocomplete="off"
+                                        placeholder='{"type":"service_account",...}'>
+                                </div>
+                                <small class="form-hint">For privacy reasons, your Service Account JSON content will be
+                                    hidden after you click 'Validate JSON'.</small>
+                                <div style="margin: var(--spacing-md) 0;">
+                                    <button type="button" id="vertexai_validate_service_account"
+                                        class="btn btn-secondary">Validate JSON</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Region -->
+                        <div class="form-group">
+                            <label for="vertexai_region">Region: <a
+                                    href="https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations"
+                                    target="_blank" rel="noopener noreferrer"
+                                    title="View available regions and models">ⓘ</a></label>
+                            <input id="vertexai_region" name="vertexai_region" class="text-input" type="text"
+                                autocomplete="off"
+                                placeholder="e.g., global, us-central1, europe-west1, asia-northeast1"
+                                list="vertexai_region_suggestions" value="us-central1">
+                            <datalist id="vertexai_region_suggestions">
+                                <option value="global">global</option>
+                                <option value="us-central1">us-central1</option>
+                                <option value="us-east1">us-east1</option>
+                                <option value="us-east4">us-east4</option>
+                                <option value="us-west1">us-west1</option>
+                                <option value="us-west2">us-west2</option>
+                                <option value="us-west3">us-west3</option>
+                                <option value="us-west4">us-west4</option>
+                                <option value="europe-west1">europe-west1</option>
+                                <option value="europe-west2">europe-west2</option>
+                                <option value="europe-west3">europe-west3</option>
+                                <option value="europe-west4">europe-west4</option>
+                                <option value="europe-west6">europe-west6</option>
+                                <option value="europe-central2">europe-central2</option>
+                                <option value="asia-northeast1">asia-northeast1</option>
+                                <option value="asia-northeast3">asia-northeast3</option>
+                                <option value="asia-southeast1">asia-southeast1</option>
+                                <option value="asia-south1">asia-south1</option>
+                                <option value="australia-southeast1">australia-southeast1</option>
+                            </datalist>
+                        </div>
+
+                        <!-- Model Selection -->
+                        <div class="form-group">
+                            <label for="model_vertexai_select">Google Model</label>
+                            <select id="model_vertexai_select">
+                                <optgroup label="Gemini 2.5">
+                                    <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                                    <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                                    <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+                                    <option value="gemini-2.5-flash-image">gemini-2.5-flash-image</option>
+                                    <option value="gemini-2.5-flash-image-preview">gemini-2.5-flash-image-preview
+                                    </option>
+                                </optgroup>
+                                <optgroup label="Gemini 2.0">
+                                    <option value="gemini-2.0-flash-exp">gemini-2.0-flash-exp</option>
+                                    <option value="gemini-2.0-flash-preview-image-generation">
+                                        gemini-2.0-flash-preview-image-generation</option>
+                                    <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                                    <option value="gemini-2.0-flash-001">gemini-2.0-flash-001</option>
+                                    <option value="gemini-2.0-flash-lite-001">gemini-2.0-flash-lite-001</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Mistral AI Form -->
+                    <form id="mistralai_form" data-source="mistralai" action="javascript:void(null);">
+                        <div class="form-group">
+                            <label for="api_key_mistralai">MistralAI API Key</label>
+                            <div class="flex-container">
+                                <input id="api_key_mistralai" name="api_key_mistralai" class="text-input flex1"
+                                    type="password" autocomplete="off">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_mistralai_select">MistralAI Model</label>
+                            <select id="model_mistralai_select">
+                                <option value="">-- Connect to the API --</option>
+                            </select>
+                        </div>
+                    </form>
+
+                    <!-- Custom API Form -->
+                    <form id="custom_form" data-source="custom" action="javascript:void(null);">
+                        <div class="form-group">
+                            <label for="custom_api_url_text">Custom Endpoint (Base URL)</label>
+                            <input id="custom_api_url_text" class="text-input" type="text" autocomplete="off"
+                                placeholder="Example: http://localhost:1234/v1">
+                            <small class="form-hint">Doesn't work? Try adding <code>/v1</code> at the end!
+                                <code>/chat/completions</code> suffix will be added automatically.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="api_key_custom">Custom API Key <small>(Optional)</small></label>
+                            <div class="flex-container">
+                                <input id="api_key_custom" name="api_key_custom" class="text-input flex1"
+                                    type="password" autocomplete="off">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="custom_model_id">Enter a Model ID</label>
+                            <input id="custom_model_id" class="text-input" type="text" autocomplete="off"
+                                placeholder="Example: gpt-4o">
+                            <datalist id="model_custom_select_fill"></datalist>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_custom_select">Available Models</label>
+                            <select id="model_custom_select"></select>
+                        </div>
+                    </form>
+
+                    <!-- Cohere Form -->
+                    <form id="cohere_form" data-source="cohere" action="javascript:void(null);">
+                        <div class="form-group">
+                            <label for="api_key_cohere">Cohere API Key</label>
+                            <div class="flex-container">
+                                <input id="api_key_cohere" name="api_key_cohere" class="text-input flex1"
+                                    type="password" autocomplete="off">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_cohere_select">Cohere Model</label>
+                            <select id="model_cohere_select">
+                                <optgroup label="Stable">
+                                    <option value="c4ai-aya-23-8b">c4ai-aya-23-8b</option>
+                                    <option value="c4ai-aya-23">c4ai-aya-23</option>
+                                    <option value="c4ai-aya-expanse-8b">c4ai-aya-expanse-8b</option>
+                                    <option value="c4ai-aya-expanse-32b">c4ai-aya-expanse-32b</option>
+                                    <option value="c4ai-aya-vision-8b">c4ai-aya-vision-8b</option>
+                                    <option value="c4ai-aya-vision-32b">c4ai-aya-vision-32b</option>
+                                    <option value="command-light">command-light</option>
+                                    <option value="command">command</option>
+                                    <option value="command-r">command-r</option>
+                                    <option value="command-r-plus">command-r-plus</option>
+                                    <option value="command-r-08-2024">command-r-08-2024</option>
+                                    <option value="command-r-plus-08-2024">command-r-plus-08-2024</option>
+                                    <option value="command-r7b-12-2024">command-r7b-12-2024</option>
+                                    <option value="command-a-03-2025">command-a-03-2025</option>
+                                    <option value="command-a-vision-07-2025">command-a-vision-07-2025</option>
+                                </optgroup>
+                                <optgroup label="Nightly">
+                                    <option value="command-light-nightly">command-light-nightly</option>
+                                    <option value="command-nightly">command-nightly</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                    </form>
+
+                    <!-- Perplexity Form -->
+                    <div id="perplexity_form" data-source="perplexity">
+                        <div class="form-group">
+                            <label for="api_key_perplexity">Perplexity API Key</label>
+                            <div class="flex-container">
+                                <input id="api_key_perplexity" name="api_key_perplexity" class="text-input flex1"
+                                    type="password" autocomplete="off" placeholder="pplx-...">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_perplexity_select">Perplexity Model</label>
+                            <select id="model_perplexity_select">
+                                <optgroup label="Perplexity Sonar Models">
+                                    <option value="sonar">sonar</option>
+                                    <option value="sonar-pro">sonar-pro</option>
+                                    <option value="sonar-reasoning">sonar-reasoning</option>
+                                    <option value="sonar-reasoning-pro">sonar-reasoning-pro</option>
+                                    <option value="sonar-deep-research">sonar-deep-research</option>
+                                </optgroup>
+                                <optgroup label="Offline Models">
+                                    <option value="r1-1776">r1-1776</option>
+                                </optgroup>
+                                <optgroup label="Deprecated Models">
+                                    <option value="llama-3.1-sonar-small-128k-online">llama-3.1-sonar-small-128k-online
+                                    </option>
+                                    <option value="llama-3.1-sonar-large-128k-online">llama-3.1-sonar-large-128k-online
+                                    </option>
+                                    <option value="llama-3.1-sonar-huge-128k-online">llama-3.1-sonar-huge-128k-online
+                                    </option>
+                                    <option value="llama-3.1-sonar-small-128k-chat">llama-3.1-sonar-small-128k-chat
+                                    </option>
+                                    <option value="llama-3.1-sonar-large-128k-chat">llama-3.1-sonar-large-128k-chat
+                                    </option>
+                                </optgroup>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Groq Form -->
+                    <div id="groq_form" data-source="groq">
+                        <div class="form-group">
+                            <label for="api_key_groq">Groq API Key</label>
+                            <div class="flex-container">
+                                <input id="api_key_groq" name="api_key_groq" class="text-input flex1" type="password"
+                                    autocomplete="off" placeholder="gsk_...">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_groq_select">Groq Model</label>
+                            <select id="model_groq_select">
+                                <option value="qwen/qwen3-32b">qwen/qwen3-32b</option>
+                                <option value="deepseek-r1-distill-llama-70b">deepseek-r1-distill-llama-70b</option>
+                                <option value="gemma2-9b-it">gemma2-9b-it</option>
+                                <option value="meta-llama/llama-4-scout-17b-16e-instruct">
+                                    meta-llama/llama-4-scout-17b-16e-instruct</option>
+                                <option value="meta-llama/llama-4-maverick-17b-128e-instruct">
+                                    meta-llama/llama-4-maverick-17b-128e-instruct</option>
+                                <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
+                                <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile </option>
+                                <option value="llama-guard-3-8b">llama-guard-3-8b</option>
+                                <option value="llama3-70b-8192">llama3-70b-8192</option>
+                                <option value="llama3-8b-8192">llama3-8b-8192</option>
+                                <option value="mistral-saba-24b">mistral-saba-24b</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- ElectronHub Form -->
+                    <div id="electronhub_form" data-source="electronhub">
+                        <div class="form-group">
+                            <label for="api_key_electronhub">ElectronHub API Key</label>
+                            <div>
+                                <a href="https://playground.electronhub.ai/console" target="_blank">View Remaining
+                                    Credits</a>
+                            </div>
+                            <div class="flex-container">
+                                <input id="api_key_electronhub" name="api_key_electronhub" class="text-input flex1"
+                                    type="password" autocomplete="off">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_electronhub_select">ElectronHub Model</label>
+                            <select id="model_electronhub_select">
+                                <option value="">-- Connect to the API --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- NanoGPT Form -->
+                    <div id="nanogpt_form" data-source="nanogpt">
+                        <div class="form-group">
+                            <label for="api_key_nanogpt">NanoGPT API Key</label>
+                            <div class="flex-container">
+                                <input id="api_key_nanogpt" name="api_key_nanogpt" class="text-input flex1"
+                                    type="password" autocomplete="off">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_nanogpt_select">NanoGPT Model</label>
+                            <select id="model_nanogpt_select">
+                                <option value="">-- Connect to the API --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- DeepSeek Form -->
+                    <div id="deepseek_form" data-source="deepseek">
+                        <div class="form-group">
+                            <label for="api_key_deepseek">DeepSeek API Key</label>
+                            <div class="flex-container">
+                                <input id="api_key_deepseek" name="api_key_deepseek" class="text-input flex1"
+                                    type="password" autocomplete="off">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_deepseek_select">DeepSeek Model</label>
+                            <select id="model_deepseek_select">
+                                <option value="deepseek-chat">deepseek-chat</option>
+                                <option value="deepseek-coder">deepseek-coder</option>
+                                <option value="deepseek-reasoner">deepseek-reasoner</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- AIML API Form -->
+                    <div id="aimlapi_form" data-source="aimlapi">
+                        <div class="form-group">
+                            <label for="api_key_aimlapi">AI/ML API Key</label>
+                            <div class="flex-container">
+                                <input id="api_key_aimlapi" name="api_key_aimlapi" class="text-input flex1"
+                                    type="password" autocomplete="off">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_aimlapi_select">AI/ML Model</label>
+                            <select id="model_aimlapi_select">
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- xAI Form -->
+                    <div id="xai_form" data-source="xai">
+                        <div class="form-group">
+                            <label for="api_key_xai"><a href="https://console.x.ai/" target="_blank"
+                                    rel="noopener noreferrer">xAI API Key</a></label>
+                            <div class="flex-container">
+                                <input id="api_key_xai" name="api_key_xai" class="text-input flex1" type="password"
+                                    autocomplete="off" placeholder="xai-...">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_xai_select">xAI Model</label>
+                            <select id="model_xai_select">
+                                <option value="">-- Connect to the API --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Pollinations Form -->
+                    <div id="pollinations_form" data-source="pollinations">
+                        <div class="form-group">
+                            <label for="model_pollinations_select">Pollinations Model</label>
+                            <select id="model_pollinations_select">
+                                <option value="">모델을 선택하세요</option>
+                            </select>
+                        </div>
+                        <div class="info-block hint">
+                            <small>Provided free of charge by Pollinations.AI</small><br>
+                            <small>Avoid sending sensitive information. Provider's outputs may include ads.</small>
+                        </div>
+                    </div>
+
+                    <!-- Moonshot Form -->
+                    <div id="moonshot_form" data-source="moonshot">
+                        <div class="form-group">
+                            <label for="api_key_moonshot"><a href="https://platform.moonshot.ai/console/api-keys"
+                                    target="_blank" rel="noopener noreferrer">Moonshot AI API Key</a></label>
+                            <div class="flex-container">
+                                <input id="api_key_moonshot" name="api_key_moonshot" class="text-input flex1"
+                                    type="password" autocomplete="off">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_moonshot_select">Moonshot AI Model</label>
+                            <select id="model_moonshot_select">
+                                <option value="kimi-k2-0711-preview">kimi-k2-0711-preview</option>
+                                <option value="moonshot-v1-8k">moonshot-v1-8k</option>
+                                <option value="moonshot-v1-32k">moonshot-v1-32k</option>
+                                <option value="moonshot-v1-128k">moonshot-v1-128k</option>
+                                <option value="moonshot-v1-auto">moonshot-v1-auto</option>
+                                <option value="kimi-latest">kimi-latest</option>
+                                <option value="moonshot-v1-8k-vision-preview">moonshot-v1-8k-vision-preview</option>
+                                <option value="moonshot-v1-32k-vision-preview">moonshot-v1-32k-vision-preview</option>
+                                <option value="moonshot-v1-128k-vision-preview">moonshot-v1-128k-vision-preview</option>
+                                <option value="kimi-thinking-preview">kimi-thinking-preview</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Fireworks Form -->
+                    <div id="fireworks_form" data-source="fireworks">
+                        <div class="form-group">
+                            <label for="api_key_fireworks">Fireworks AI API Key</label>
+                            <div class="flex-container">
+                                <input id="api_key_fireworks" name="api_key_fireworks" class="text-input flex1"
+                                    type="password" autocomplete="off">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_fireworks_select">Fireworks AI Model</label>
+                            <select id="model_fireworks_select">
+                                <option value="">-- Connect to the API --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Comet API Form -->
+                    <div id="cometapi_form" data-source="cometapi">
+                        <div class="form-group">
+                            <label for="api_key_cometapi"><a href="https://api.cometapi.com/" target="_blank"
+                                    rel="noopener noreferrer">CometAPI API Key</a></label>
+                            <div class="flex-container">
+                                <input id="api_key_cometapi" name="api_key_cometapi" class="text-input flex1"
+                                    type="password" autocomplete="off">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_cometapi_select">CometAPI Model</label>
+                            <div class="flex-container">
+                                <select id="model_cometapi_select" class="flex1">
+                                    <option value="">-- Connect to the API --</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Azure OpenAI Settings -->
+                    <div id="azure_openai_settings" data-source="azure_openai">
+                        <div class="form-group">
+                            <label for="azure_base_url">Azure Base URL</label>
+                            <input id="azure_base_url" name="azure_base_url" class="text-input" type="text"
+                                placeholder="https://your-resource.openai.azure.com/">
+                        </div>
+                        <div class="form-group">
+                            <label for="azure_deployment_name">Deployment Name</label>
+                            <input id="azure_deployment_name" name="azure_deployment_name" class="text-input"
+                                type="text" placeholder="your-deployment-name">
+                        </div>
+                        <div class="form-group">
+                            <label for="azure_api_version">API Version</label>
+                            <select id="azure_api_version">
+                                <option value="2025-04-01-preview">2025-04-01-preview</option>
+                                <option value="2024-10-21">2024-10-21</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="api_key_azure_openai">Azure OpenAI API Key</label>
+                            <div class="flex-container">
+                                <input id="api_key_azure_openai" name="api_key_azure_openai" class="text-input flex1"
+                                    type="password" autocomplete="off">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="azure_openai_model">Model Name</label>
+                            <select id="azure_openai_model">
+                                <option value="" disabled selected>Click 'Connect' to fetch model name</option>
+                            </select>
+                            <small class="form-hint">The underlying model of your deployment. This is detected
+                                automatically when you connect.</small>
+                        </div>
+                    </div>
+
+                    <!-- Z.AI Form -->
+                    <div id="zai_form" data-source="zai">
+                        <div class="form-group">
+                            <label for="api_key_zai"><a href="https://z.ai/manage-apikey/apikey-list" target="_blank"
+                                    rel="noopener noreferrer">Z.AI API Key</a></label>
+                            <div class="flex-container">
+                                <input id="api_key_zai" name="api_key_zai" class="text-input flex1" type="password"
+                                    autocomplete="off">
+                            </div>
+                            <small class="form-hint">For privacy reasons, your API key will be hidden after you click
+                                'Connect'.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="model_zai_select">Z.AI Model</label>
+                            <select id="model_zai_select">
+                                <option value="glm-4.6">glm-4.6</option>
+                                <option value="glm-4.5v">glm-4.5v</option>
+                                <option value="glm-4.5">glm-4.5</option>
+                                <option value="glm-4.5-air">glm-4.5-air</option>
+                                <option value="glm-4.5-x">glm-4.5-x</option>
+                                <option value="glm-4.5-airx">glm-4.5-airx</option>
+                                <option value="glm-4.5-flash">glm-4.5-flash</option>
+                                <option value="glm-4-alltools">glm-4-alltools</option>
+                                <option value="glm-4-0520">glm-4-0520</option>
+                                <option value="glm-4-9b-chat">glm-4-9b-chat</option>
+                                <option value="glm-4-9b-chat-1m">glm-4-9b-chat-1m</option>
+                                <option value="glm-4-32b-0414-128k">glm-4-32b-0414-128k</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- API 사용 가능 안내 -->
+                    <div class="settings-section">
+                        <div class="info-block success">
+                            <small>
+                                <strong>✅ 프록시 없이 사용 가능한 API:</strong><br>
+                                • <strong>Claude (Anthropic)</strong> - 브라우저에서 직접 호출 가능<br>
+                                • <strong>Google Gemini / Vertex AI</strong> - 브라우저에서 직접 호출 가능<br><br>
+                                <strong>❌ 다른 API들</strong>(OpenAI, Azure OpenAI, Cohere 등)은 CORS 정책으로 브라우저에서 직접 호출이
+                                차단됩니다. 프록시 서버가 필요합니다.
+                            </small>
+                        </div>
+                    </div>
+
+                    <!-- Connect & Test Message Buttons -->
+                    <div class="settings-section">
+                        <div class="flex-container" style="gap: var(--spacing-md); margin-top: var(--spacing-xl);">
+                            <button type="button" id="api_connect_button" class="btn" style="flex: 1;">Connect</button>
+                            <button type="button" id="api_test_button" class="btn btn-secondary" style="flex: 1;">Test
+                                Message</button>
+                        </div>
+                        <div id="api_status_message" class="info-block"
+                            style="display: none; margin-top: var(--spacing-md);">
+                            <span id="api_status_text"></span>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <!-- 오버레이 -->
+    <div id="overlay" class="overlay hidden"></div>
+
+    <!-- AI 로딩 로더 -->
+    <div id="ai-loader" class="ai-loader hidden">
+        <div class="ai-loader-content">
+            <div class="ai-loader-spinner">
+                <i class="fa-solid fa-gear fa-spin"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- jQuery (Select2 의존성) -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <!-- jQuery UI (드래그 앤 드롭용) -->
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/ui-lightness/jquery-ui.css">
+    <!-- Select2 -->
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <!-- Showdown 마크다운 라이브러리 -->
+    <script src="https://cdn.jsdelivr.net/npm/showdown@2.1.0/dist/showdown.min.js"></script>
+    
+    <!-- API 모듈 로드 (의존성 순서대로) -->
+    <!-- API 공통 유틸리티 -->
+    <script src="api/base.js"></script>
+    <!-- 개별 API 구현 -->
+    <script src="api/openai.js"></script>
+    <script src="api/anthropic.js"></script>
+    <script src="api/gemini.js"></script>
+    <script src="api/vertexai-auth.js"></script>
+    <script src="api/vertexai.js"></script>
+    <script src="api/openrouter.js"></script>
+    <script src="api/mistral.js"></script>
+    <script src="api/cohere.js"></script>
+    <script src="api/perplexity.js"></script>
+    <script src="api/groq.js"></script>
+    <script src="api/deepseek.js"></script>
+    <script src="api/xai.js"></script>
+    <script src="api/moonshot.js"></script>
+    <script src="api/fireworks.js"></script>
+    <script src="api/aimlapi.js"></script>
+    <script src="api/electronhub.js"></script>
+    <script src="api/nanogpt.js"></script>
+    <script src="api/pollinations.js"></script>
+    <script src="api/zai.js"></script>
+    <script src="api/azure.js"></script>
+    <script src="api/custom.js"></script>
+    <!-- API 통합 인터페이스 -->
+    <script src="api/index.js"></script>
+    <script src="api/models.js"></script>
+    
+    <!-- 모듈 로드 (의존성 순서대로) -->
+    <!-- 기본 유틸리티 -->
+    <script src="modules/utils.js"></script>
+    <script src="modules/macros.js"></script>
+    <!-- 프롬프트 관련 -->
+    <script src="modules/prompt.js"></script>
+    <script src="modules/promptCollection.js"></script>
+    <!-- 메시지 관련 -->
+    <script src="modules/message.js"></script>
+    <script src="modules/messageCollection.js"></script>
+    <script src="modules/chatCompletion.js"></script>
+    <!-- 저장소 -->
+    <script src="modules/storage.js"></script>
+    <!-- Utils 모듈 로드 (storage.js 이후) -->
+    <script src="utils/fileParser.js"></script>
+    <script src="utils/pngEncoder.js"></script>
+    <script src="utils/export.js"></script>
+    <!-- 토큰 최적화 유틸리티 (API 호출 전에 로드) -->
+    <script src="utils/tokenOptimization.js"></script>
+    <script src="utils/import.js"></script>
+    <script src="utils/regexImportExport.js"></script>
+    <script src="utils/aiLoadingPresetImportExport.js"></script>
+    <!-- 토큰 관리 -->
+    <script src="modules/tokenCounter.js"></script>
+    <script src="modules/tokenHandler.js"></script>
+    <!-- 프롬프트 관리 -->
+    <script src="modules/promptManager.js"></script>
+    <script src="modules/promptPreparation.js"></script>
+    <!-- 캐릭터/프롬프트 통합 -->
+    <script src="modules/characterPromptIntegration.js"></script>
+    <script src="modules/worldInfoIntegration.js"></script>
+    <!-- 정규식 -->
+    <script src="modules/regexEngine.js"></script>
+    <script src="modules/regexManager.js"></script>
+    <!-- 설정 및 프리셋 -->
+    <script src="modules/presetManager.js"></script>
+    <script src="modules/settingsManager.js"></script>
+    <!-- 채팅 완성 -->
+    <script src="modules/populateChatCompletion.js"></script>
+    <script src="modules/prepareOpenAIMessages.js"></script>
+    <!-- 상태창/선택지 -->
+    <script src="modules/statusBarChoice.js"></script>
+    <!-- AI 메시지 전송 -->
+    <script src="modules/aiMessageSender.js"></script>
+    <script src="modules/autofillSender.js"></script>
+    <!-- UI 패널 -->
+    <script src="modules/uiPanels.js"></script>
+    <!-- 대필 모달 -->
+    <script src="modules/autofillModal.js"></script>
+    <script src="modules/autofillPromptPanel.js"></script>
+    <!-- 슬래시 명령어 -->
+    <script src="modules/slashCommands.js"></script>
+    <!-- 캐릭터 관련 -->
+    <script src="modules/characterProfile.js"></script>
+    <script src="modules/greetingsEditor.js"></script>
+    <script src="modules/characterManager.js"></script>
+    <!-- 토스트 알림 -->
+    <script src="modules/toastNotification.js"></script>
+    <!-- 프롬프트 템플릿 패널 -->
+    <script src="modules/promptsTemplatesPanel.js"></script>
+    <!-- 페르소나 에디터 -->
+    <script src="modules/personaEditor.js"></script>
+    <!-- 파일 관리 -->
+    <script src="modules/fileManager.js"></script>
+    <!-- 패널 관리 -->
+    <script src="modules/panel.js"></script>
+    <!-- 메뉴 관리 -->
+    <script src="modules/menu.js"></script>
+    <!-- 채팅 관리 -->
+    <script src="modules/chatManager.js"></script>
+    <!-- 메인 앱 -->
+    <script src="src/app.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,21 @@
+/* 반응형 스타일 */
+
+/* 모바일 반응형 */
+@media (max-width: 767px) {
+    .message {
+        max-width: 100%;
+    }
+    
+    .message-content {
+        max-width: 100% /* 아바타(40px) + gap(12px) */
+    }
+    /* 편집 모드에서는 모바일에서도 넓게 */
+    .message-wrapper.editing .message {
+        max-width: 100% !important;
+    }
+    
+    .message-wrapper.editing .message-content {
+        max-width: 100% !important;
+        width: 100% !important;
+    }
+}

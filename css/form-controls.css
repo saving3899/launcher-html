@@ -1,0 +1,56 @@
+/* 폼 컨트롤 스타일 */
+
+/* 체크박스 스타일 (실리태번 스타일) */
+.checkbox {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    cursor: pointer;
+    user-select: none;
+}
+
+.checkbox input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    border: 2px solid var(--border-color);
+    border-radius: 50%;
+    position: relative;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.checkbox input[type="checkbox"]:checked {
+    background: var(--accent-pink);
+    border-color: var(--accent-pink);
+}
+
+.checkbox input[type="checkbox"]:checked::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 6px;
+    height: 6px;
+    background: white;
+    border-radius: 50%;
+}
+
+.checkbox input[type="checkbox"]:hover {
+    border-color: var(--accent-pink);
+}
+
+.checkbox input[type="checkbox"]:focus {
+    outline: 2px solid rgba(255, 105, 180, 0.3);
+    outline-offset: 2px;
+}
+
+.checkbox span {
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
