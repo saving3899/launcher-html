@@ -130,7 +130,7 @@
     min-height: 44px;
     max-height: 40vh;
     max-height: 40dvh;
-    line-height: 1.2;
+    line-height: 1.4;
     transition: all var(--transition-fast);
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
     overflow-y: hidden; /* JavaScript에서 동적으로 조절 */
