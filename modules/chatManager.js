@@ -940,10 +940,11 @@ class ChatManager {
                     }
                     
                     // 여러 줄인 경우에만 scrollHeight 측정
-                    // 높이를 auto로 설정하여 scrollHeight 정확히 측정
-                    this.elements.messageInput.style.height = 'auto';
+                    // iOS Safari 호환: height를 1px로 리셋하여 강제 리플로우 유발
+                    const originalHeight = this.elements.messageInput.style.height;
+                    this.elements.messageInput.style.height = '1px';
                     
-                    // scrollHeight 측정
+                    // scrollHeight 측정 (iOS Safari에서 정확한 측정을 위해)
                     const scrollHeight = this.elements.messageInput.scrollHeight;
                     
                     // 최소/최대 높이 적용
@@ -965,6 +966,7 @@ class ChatManager {
             this.elements.messageInput.style.overflow = 'hidden';
             this.elements.messageInput.style.minHeight = '44px';
             this.elements.messageInput.style.maxHeight = '40vh';
+            this.elements.messageInput.style.maxHeight = '40dvh';
             
             // 초기 높이 설정
             adjustHeight();
@@ -2940,7 +2942,7 @@ class ChatManager {
      * @param {Array<string>} swipes - 스와이프 가능한 대안 응답 배열 (assistant일 때 사용)
      * @param {number} swipeIndex - 현재 표시할 스와이프 인덱스 (기본값: 0)
      */
-    async addMessage(text, sender, characterName = null, characterAvatar = null, swipes = [], swipeIndex = 0, userAvatar = null, sendDate = null, reasoning = null) {
+    async addMessage(text, sender, characterName = null, characterAvatar = null, swipes = [], swipeIndex = 0, userAvatar = null, sendDate = null, reasoning = null, originalUserName = null) {
         // 사용자 이름과 캐릭터 이름 가져오기 (매크로 치환용)
         let userName = '';
         let charName = characterName || '';
@@ -2962,12 +2964,18 @@ class ChatManager {
             }
             
             // 사용자 이름 가져오기
-            const settings = await SettingsStorage.load();
-            const currentPersonaId = settings.currentPersonaId;
-            if (currentPersonaId) {
-                const persona = await UserPersonaStorage.load(currentPersonaId);
-                if (persona?.name) {
-                    userName = persona.name;
+            // ⚠️ 중요: originalUserName이 있으면 원본 이름 사용 (불러온 채팅의 원본 이름 보존)
+            // originalUserName이 없으면 현재 페르소나 이름 사용 (새 메시지)
+            if (originalUserName !== null && originalUserName !== undefined) {
+                userName = originalUserName;
+            } else {
+                const settings = await SettingsStorage.load();
+                const currentPersonaId = settings.currentPersonaId;
+                if (currentPersonaId) {
+                    const persona = await UserPersonaStorage.load(currentPersonaId);
+                    if (persona?.name) {
+                        userName = persona.name;
+                    }
                 }
             }
         } catch (error) {
@@ -3261,8 +3269,13 @@ class ChatManager {
         const messageName = document.createElement('div');
         messageName.className = 'message-name';
         if (sender === 'user') {
-            // 사용자 이름 사용 (이미 위에서 가져옴)
+            // ⚠️ 중요: originalUserName이 있으면 원본 이름 사용 (불러온 채팅의 원본 이름 보존)
+            // originalUserName이 없으면 현재 페르소나 이름 사용 (새 메시지)
             messageName.textContent = userName || 'User';
+            // 원본 이름을 dataset에 저장 (saveChat에서 읽기 위해)
+            if (originalUserName !== null && originalUserName !== undefined) {
+                messageWrapper.dataset.originalUserName = originalUserName;
+            }
         } else {
             // 캐릭터 이름 사용 (다른 캐릭터인 경우에도 올바른 이름 표시)
             messageName.textContent = charName || 'Character';
@@ -4363,9 +4376,32 @@ class ChatManager {
                                 reasoning = wrapper.dataset.reasoning;
                             }
                             
+                            // ⚠️ 중요: 유저 메시지의 원본 이름 보존 (불러온 채팅)
+                            let messageName = msg.name;
+                            if (msg.is_user) {
+                                // 1. dataset에서 원본 이름 확인 (불러온 채팅)
+                                if (wrapper.dataset.originalUserName) {
+                                    messageName = wrapper.dataset.originalUserName;
+                                }
+                                // 2. DOM의 .message-name 요소에서 이름 읽기
+                                else {
+                                    const messageNameElement = wrapper.querySelector('.message-name');
+                                    if (messageNameElement && messageNameElement.textContent && messageNameElement.textContent !== 'User') {
+                                        messageName = messageNameElement.textContent.trim();
+                                    }
+                                }
+                                // 3. msg.name이 'User'가 아니면 원본으로 간주
+                                if (!messageName || messageName === 'User') {
+                                    if (msg.name && msg.name !== 'User') {
+                                        messageName = msg.name;
+                                    }
+                                }
+                            }
+                            
                             // DOM에서 최신 내용으로 업데이트
                             return {
                                 ...msg,
+                                name: messageName, // 원본 이름 보존
                                 mes: finalMessageText,
                                 send_date: sendDate,
                                 extra: {
@@ -4432,10 +4468,34 @@ class ChatManager {
                     
                     // 실리태번과 동일: 메시지의 name 필드 확인 (다른 캐릭터가 보낸 메시지 처리)
                     let messageName = isUser ? 'User' : characterName;
-                    if (!isUser && wrapper.dataset.characterName) {
-                        const storedCharacterName = wrapper.dataset.characterName;
-                        if (storedCharacterName !== characterName) {
-                            messageName = storedCharacterName;
+                    
+                    if (isUser) {
+                        // ⚠️ 중요: 유저 메시지의 경우 원본 이름 우선 사용 (불러온 채팅의 원본 이름 보존)
+                        // 1. dataset에서 원본 이름 확인 (불러온 채팅)
+                        if (wrapper.dataset.originalUserName) {
+                            messageName = wrapper.dataset.originalUserName;
+                        }
+                        // 2. DOM의 .message-name 요소에서 이름 읽기 (원본 이름이 저장된 경우)
+                        else {
+                            const messageNameElement = wrapper.querySelector('.message-name');
+                            if (messageNameElement && messageNameElement.textContent && messageNameElement.textContent !== 'User') {
+                                messageName = messageNameElement.textContent.trim();
+                            }
+                        }
+                        // 3. this.chat 배열에서 원본 name 확인 (fallback)
+                        if (messageName === 'User' && messageUuid && this.chat) {
+                            const chatMessage = this.chat.find(msg => msg.uuid === messageUuid);
+                            if (chatMessage && chatMessage.name && chatMessage.name !== 'User') {
+                                messageName = chatMessage.name;
+                            }
+                        }
+                    } else {
+                        // AI 메시지: 다른 캐릭터 처리
+                        if (wrapper.dataset.characterName) {
+                            const storedCharacterName = wrapper.dataset.characterName;
+                            if (storedCharacterName !== characterName) {
+                                messageName = storedCharacterName;
+                            }
                         }
                     }
 
@@ -4621,6 +4681,7 @@ class ChatManager {
                             domMessagesLength: domMessages.length
                         });
                     }
+                    
                     // 삭제된 메시지를 제외한 기존 메시지 필터링
                     const existingMessages = (existingChatData.messages || []).filter(msg => {
                         // _deletedMessageUuids에 포함된 메시지는 제외
@@ -4629,6 +4690,10 @@ class ChatManager {
                         }
                         return true;
                     });
+                    
+                    // ⚠️ 중요: 불러온 채팅도 불러온 직후부터는 일반 채팅처럼 관리
+                    // (this.chat이 단일 소스이므로 특별 취급 불필요)
+                    let messagesAlreadySet = false;
                     // domMessages가 null이면 빈 배열로 처리 (this.chat 사용 시 이미 위에서 설정됨)
                     const domMessagesForUuids = domMessages || [];
                     const domMessageUuids = new Set(domMessagesForUuids.map(msg => msg.uuid).filter(uuid => uuid));
@@ -4641,38 +4706,82 @@ class ChatManager {
                     
                     console.log('[ChatManager.saveChat] 메시지 병합:', {
                         chatId: chatId?.substring(0, 30),
-                        domMessageCount: domMessages.length,
+                        domMessageCount: (domMessages || []).length,
                         existingMessageCount: existingMessages.length,
                         missingMessageCount: missingMessages.length,
-                        willMerge: missingMessages.length > 0 || existingMessages.length > domMessages.length,
+                        willMerge: missingMessages.length > 0 || existingMessages.length > (domMessages || []).length,
                         currentChatId: this.currentChatId?.substring(0, 30),
-                        isNewChat: isNewChat
+                        isNewChat: isNewChat,
+                        messagesAlreadySet: messagesAlreadySet
                     });
                     
-                    // 중요: DOM 메시지 수가 기존 메시지 수보다 적으면 반드시 병합
-                    // 더보기로 일부만 표시된 경우에도 모든 메시지를 보존해야 함
-                    // 단, 삭제된 메시지는 제외해야 함
-                    // 
-                    // 삭제된 메시지 판단:
-                    // 1. DOM에 있는 메시지는 살아있음 (편집된 경우 최신 내용)
-                    // 2. DOM에 없지만 send_date가 DOM의 마지막 메시지보다 이전이면 더보기로 숨겨진 메시지
-                    // 3. DOM에 없고 send_date가 DOM의 마지막 메시지보다 이후면 삭제된 메시지 (regenerateMessage 등)
-                    const chatUuids = new Set();
-                    if (this.chat && this.chat.length > 0) {
-                        this.chat.forEach(msg => {
-                            if (msg.uuid) {
-                                chatUuids.add(msg.uuid);
-                            }
+                    // ⚠️ 중요: messages가 이미 설정되었으면 병합 로직 건너뜀 (불러온 채팅이고 아무 메시지도 추가하지 않음)
+                    if (messagesAlreadySet) {
+                        console.log('[ChatManager.saveChat] messages가 이미 설정되어 병합 로직 건너뜀:', {
+                            messageCount: messages.length,
+                            reason: '불러온 채팅이고 아무 메시지도 추가하지 않아 existingMessages 사용'
                         });
-                    }
-                    
-                    // 중요: this.chat이 비어있거나 로드되지 않았을 때도 existingMessages가 있으면 병합
-                    // 불러온 채팅의 경우 DOM에 일부만 표시되더라도 모든 메시지를 보존해야 함
-                    // 단, 삭제된 메시지(_deletedMessageUuids에 포함)는 제외
-                    if (chatUuids.size === 0) {
-                        // this.chat이 비어있지만 existingMessages가 있으면 병합 (불러온 채팅 등)
-                        // DOM 메시지(최신 내용) + DOM에 없는 기존 메시지(더보기로 숨겨진 메시지)
-                        if (missingMessages.length > 0 || existingMessages.length > (domMessages || []).length) {
+                    } else {
+                        // 중요: DOM 메시지 수가 기존 메시지 수보다 적으면 반드시 병합
+                        // 더보기로 일부만 표시된 경우에도 모든 메시지를 보존해야 함
+                        // 단, 삭제된 메시지는 제외해야 함
+                        // 
+                        // 삭제된 메시지 판단:
+                        // 1. DOM에 있는 메시지는 살아있음 (편집된 경우 최신 내용)
+                        // 2. DOM에 없지만 send_date가 DOM의 마지막 메시지보다 이전이면 더보기로 숨겨진 메시지
+                        // 3. DOM에 없고 send_date가 DOM의 마지막 메시지보다 이후면 삭제된 메시지 (regenerateMessage 등)
+                        const chatUuids = new Set();
+                        if (this.chat && this.chat.length > 0) {
+                            this.chat.forEach(msg => {
+                                if (msg.uuid) {
+                                    chatUuids.add(msg.uuid);
+                                }
+                            });
+                        }
+                        
+                        // 중요: this.chat이 비어있거나 로드되지 않았을 때도 existingMessages가 있으면 병합
+                        // 단, 삭제된 메시지(_deletedMessageUuids에 포함)는 제외
+                        if (chatUuids.size === 0) {
+                            // this.chat이 비어있지만 existingMessages가 있으면 병합
+                            if (missingMessages.length > 0 || existingMessages.length > (domMessages || []).length) {
+                                // DOM 메시지는 최신 내용을 반영하므로 우선 사용
+                                const domMessageMap = new Map();
+                                (domMessages || []).forEach(msg => {
+                                    if (msg.uuid) {
+                                        domMessageMap.set(msg.uuid, msg);
+                                    }
+                                });
+                                
+                                // DOM 메시지 + DOM에 없는 기존 메시지 병합
+                                // DOM 메시지가 우선이므로, 기존 메시지 중 DOM에 없는 것만 추가
+                                const mergedMessages = [...(domMessages || [])];
+                                missingMessages.forEach(msg => {
+                                    if (!domMessageMap.has(msg.uuid)) {
+                                        mergedMessages.push(msg);
+                                    }
+                                });
+                                
+                                // send_date 기준 정렬 (원본 순서 유지)
+                                mergedMessages.sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
+                                messages = mergedMessages;
+                                
+                                console.log('[ChatManager.saveChat] ⚠️ this.chat이 비어있지만 existingMessages 병합:', {
+                                    domMessageCount: (domMessages || []).length,
+                                    existingMessageCount: existingMessages.length,
+                                    missingMessageCount: missingMessages.length,
+                                    mergedMessageCount: messages.length,
+                                    reason: 'this.chat이 비어있지만 existingMessages가 있어 병합'
+                                });
+                            } else {
+                                // existingMessages가 없거나 DOM 메시지와 동일하면 DOM 메시지만 사용
+                                messages = domMessages || [];
+                                console.log('[ChatManager.saveChat] ⚠️ this.chat이 비어있고 병합 불필요, DOM 메시지만 사용:', {
+                                    domMessageCount: (domMessages || []).length,
+                                    existingMessageCount: existingMessages.length,
+                                    reason: 'this.chat이 비어있고 병합 불필요'
+                                });
+                            }
+                        } else if (missingMessages.length > 0 || existingMessages.length > (domMessages || []).length) {
                             // DOM 메시지는 최신 내용을 반영하므로 우선 사용
                             const domMessageMap = new Map();
                             (domMessages || []).forEach(msg => {
@@ -4681,105 +4790,66 @@ class ChatManager {
                                 }
                             });
                             
-                            // DOM 메시지 + DOM에 없는 기존 메시지 병합
-                            // DOM 메시지가 우선이므로, 기존 메시지 중 DOM에 없는 것만 추가
-                            const mergedMessages = [...(domMessages || [])];
-                            missingMessages.forEach(msg => {
-                                if (!domMessageMap.has(msg.uuid)) {
-                                    mergedMessages.push(msg);
-                                }
-                            });
+                            // DOM의 마지막 메시지 send_date 찾기 (삭제 판단 기준)
+                            const lastDomMessageDate = (domMessages || []).length > 0 
+                                ? Math.max(...(domMessages || []).map(msg => msg.send_date || 0))
+                                : 0;
                             
-                            // send_date 기준 정렬 (원본 순서 유지)
-                            mergedMessages.sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
-                            messages = mergedMessages;
+                            // 중요: this.chat이 단일 소스이므로, this.chat에 없는 메시지는 삭제된 것으로 간주
+                            messages = existingMessages
+                                .filter(existingMsg => {
+                                    // DOM에 있으면 포함 (편집된 경우 최신 내용)
+                                    if (existingMsg.uuid && domMessageMap.has(existingMsg.uuid)) {
+                                        return true;
+                                    }
+                                    // DOM에 없지만 this.chat에 있으면 더보기로 숨겨진 메시지로 간주하여 포함
+                                    if (existingMsg.uuid && chatUuids.has(existingMsg.uuid)) {
+                                        return true;
+                                    }
+                                    // DOM에 없고 this.chat에도 없으면 삭제된 메시지 (제외)
+                                    if (existingMsg.uuid && this._deletedMessageUuids && this._deletedMessageUuids.has(existingMsg.uuid)) {
+                                        // 삭제된 메시지로 간주하여 제외
+                                        return false;
+                                    }
+                                    // send_date가 DOM의 마지막 메시지보다 이전이면 더보기로 숨겨진 메시지일 수 있음
+                                    // 하지만 this.chat에 없으면 삭제된 것으로 간주 (리롤 후 새 메시지 생성 시)
+                                    if (existingMsg.send_date && existingMsg.send_date < lastDomMessageDate) {
+                                        // this.chat에 없으면 삭제된 메시지로 간주하여 제외
+                                        // (리롤로 인해 this.chat에서 제거되었을 수 있음)
+                                        return false;
+                                    }
+                                    // send_date가 없거나 DOM의 마지막 메시지보다 이후면 삭제된 메시지로 간주하여 제외
+                                    return false;
+                                })
+                                .map(existingMsg => {
+                                    // DOM에 있는 메시지는 DOM의 최신 내용 사용
+                                    if (existingMsg.uuid && domMessageMap.has(existingMsg.uuid)) {
+                                        return domMessageMap.get(existingMsg.uuid);
+                                    }
+                                    // DOM에 없는 메시지는 기존 메시지 사용 (더보기로 숨겨진 메시지)
+                                    return existingMsg;
+                                });
                             
-                            console.log('[ChatManager.saveChat] ⚠️ this.chat이 비어있지만 existingMessages 병합 (불러온 채팅 등):', {
-                                domMessageCount: (domMessages || []).length,
-                                existingMessageCount: existingMessages.length,
-                                missingMessageCount: missingMessages.length,
-                                mergedMessageCount: messages.length,
-                                reason: 'this.chat이 비어있지만 existingMessages가 있어 병합'
+                            // send_date 기준으로 정렬 (순서 보장)
+                            messages.sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
+                            
+                            console.log('[ChatManager.saveChat] ✅ 병합 완료:', {
+                                totalMessages: messages.length,
+                                domMessages: (domMessages || []).length,
+                                existingMessages: existingMessages.length,
+                                chatArrayLength: this.chat?.length || 0,
+                                deletedMessages: existingMessages.length - messages.length,
+                                lastDomMessageDate,
+                                chatUuidsCount: chatUuids.size
                             });
                         } else {
-                            // existingMessages가 없거나 DOM 메시지와 동일하면 DOM 메시지만 사용
+                            // 모든 메시지가 DOM에 있으면 DOM 메시지만 사용
                             messages = domMessages || [];
-                            console.log('[ChatManager.saveChat] ⚠️ this.chat이 비어있고 병합 불필요, DOM 메시지만 사용:', {
-                                domMessageCount: (domMessages || []).length,
-                                existingMessageCount: existingMessages.length,
-                                reason: 'this.chat이 비어있고 병합 불필요'
+                            console.log('[ChatManager.saveChat] ⚠️ 병합 불필요 (모든 메시지가 DOM에 있음):', {
+                                totalMessages: messages.length,
+                                domMessages: (domMessages || []).length
                             });
                         }
-                    } else if (missingMessages.length > 0 || existingMessages.length > (domMessages || []).length) {
-                        // DOM 메시지는 최신 내용을 반영하므로 우선 사용
-                        const domMessageMap = new Map();
-                        (domMessages || []).forEach(msg => {
-                            if (msg.uuid) {
-                                domMessageMap.set(msg.uuid, msg);
-                            }
-                        });
-                        
-                        // DOM의 마지막 메시지 send_date 찾기 (삭제 판단 기준)
-                        const lastDomMessageDate = (domMessages || []).length > 0 
-                            ? Math.max(...(domMessages || []).map(msg => msg.send_date || 0))
-                            : 0;
-                        
-                        // 기존 메시지를 순회하면서 필터링 및 병합
-                        // 중요: this.chat이 단일 소스이므로, this.chat에 없는 메시지는 삭제된 것으로 간주
-                        messages = existingMessages
-                            .filter(existingMsg => {
-                                // DOM에 있으면 포함 (편집된 경우 최신 내용)
-                                if (existingMsg.uuid && domMessageMap.has(existingMsg.uuid)) {
-                                    return true;
-                                }
-                                // DOM에 없지만 this.chat에 있으면 더보기로 숨겨진 메시지로 간주하여 포함
-                                if (existingMsg.uuid && chatUuids.has(existingMsg.uuid)) {
-                                    return true;
-                                }
-                                // DOM에 없고 this.chat에도 없으면 삭제된 메시지 (제외)
-                                // _deletedMessageUuids도 확인하지만, this.chat이 더 우선순위가 높음
-                                if (existingMsg.uuid && this._deletedMessageUuids && this._deletedMessageUuids.has(existingMsg.uuid)) {
-                                    // 삭제된 메시지로 간주하여 제외
-                                    return false;
-                                }
-                                // send_date가 DOM의 마지막 메시지보다 이전이면 더보기로 숨겨진 메시지일 수 있음
-                                // 하지만 this.chat에 없으면 삭제된 것으로 간주 (리롤 후 새 메시지 생성 시)
-                                if (existingMsg.send_date && existingMsg.send_date < lastDomMessageDate) {
-                                    // this.chat에 없으면 삭제된 메시지로 간주하여 제외
-                                    // (리롤로 인해 this.chat에서 제거되었을 수 있음)
-                                    return false;
-                                }
-                                // send_date가 없거나 DOM의 마지막 메시지보다 이후면 삭제된 메시지로 간주하여 제외
-                                return false;
-                            })
-                            .map(existingMsg => {
-                                // DOM에 있는 메시지는 DOM의 최신 내용 사용
-                                if (existingMsg.uuid && domMessageMap.has(existingMsg.uuid)) {
-                                    return domMessageMap.get(existingMsg.uuid);
-                                }
-                                // DOM에 없는 메시지는 기존 메시지 사용 (더보기로 숨겨진 메시지)
-                                return existingMsg;
-                            });
-                        
-                        // send_date 기준으로 정렬 (순서 보장)
-                        messages.sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
-                        
-                        console.log('[ChatManager.saveChat] ✅ 병합 완료:', {
-                            totalMessages: messages.length,
-                            domMessages: (domMessages || []).length,
-                            existingMessages: existingMessages.length,
-                            chatArrayLength: this.chat?.length || 0,
-                            deletedMessages: existingMessages.length - messages.length,
-                            lastDomMessageDate,
-                            chatUuidsCount: chatUuids.size
-                        });
-                    } else {
-                        // 모든 메시지가 DOM에 있으면 DOM 메시지만 사용
-                        messages = domMessages || [];
-                        console.log('[ChatManager.saveChat] ⚠️ 병합 불필요 (모든 메시지가 DOM에 있음):', {
-                            totalMessages: messages.length,
-                            domMessages: (domMessages || []).length
-                        });
                     }
                 } else {
                     // IndexedDB에 기존 메시지가 없으면 DOM 메시지만 사용
@@ -4980,78 +5050,25 @@ class ChatManager {
                     domMessages: domMessages ? { length: domMessages.length, uuids: domMessages.map(msg => msg.uuid?.substring(0, 8) || 'no-uuid') } : null
                 });
                 
-                // existingChatData가 있으면 병합 로직 사용 (삭제된 메시지 제외)
-                if (existingChatData && existingChatData.messages && existingChatData.messages.length > 0) {
-                    // this.chat을 domMessages로 사용
-                    const chatAsDomMessages = this.chat.map(msg => ({
-                        ...msg,
-                        uuid: msg.uuid,
-                        send_date: msg.send_date || Date.now()
-                    }));
-                    
-                    // 삭제된 메시지를 제외한 기존 메시지 필터링
-                    const existingMessages = (existingChatData.messages || []).filter(msg => {
-                        if (msg.uuid && this._deletedMessageUuids && this._deletedMessageUuids.has(msg.uuid)) {
+                // ⚠️ 중요: this.chat이 단일 소스이므로 직접 사용
+                // (불러온 채팅도 불러온 직후부터는 일반 채팅처럼 this.chat이 단일 소스)
+                messages = [...this.chat];
+                // 삭제된 메시지만 제외
+                if (this._deletedMessageUuids && this._deletedMessageUuids.size > 0) {
+                    messages = messages.filter(msg => {
+                        if (msg.uuid && this._deletedMessageUuids.has(msg.uuid)) {
                             return false;
                         }
                         return true;
                     });
-                    
-                    const chatUuids = new Set();
-                    this.chat.forEach(msg => {
-                        if (msg.uuid) {
-                            chatUuids.add(msg.uuid);
-                        }
-                    });
-                    
-                    const domMessageMap = new Map();
-                    chatAsDomMessages.forEach(msg => {
-                        if (msg.uuid) {
-                            domMessageMap.set(msg.uuid, msg);
-                        }
-                    });
-                    
-                    // 병합: existingMessages에서 this.chat에 있는 메시지만 포함
-                    messages = existingMessages
-                        .filter(existingMsg => {
-                            if (existingMsg.uuid && domMessageMap.has(existingMsg.uuid)) {
-                                return true;
-                            }
-                            if (existingMsg.uuid && chatUuids.has(existingMsg.uuid)) {
-                                return true;
-                            }
-                            return false;
-                        })
-                        .map(existingMsg => {
-                            if (existingMsg.uuid && domMessageMap.has(existingMsg.uuid)) {
-                                return domMessageMap.get(existingMsg.uuid);
-                            }
-                            return existingMsg;
-                        });
-                    
-                    // this.chat에 있지만 existingMessages에 없는 새 메시지 추가
-                    chatAsDomMessages.forEach(msg => {
-                        if (msg.uuid && !existingMessages.some(existing => existing.uuid === msg.uuid)) {
-                            messages.push(msg);
-                        }
-                    });
-                    
-                    messages.sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
-                    messageCount = messages.length;
-                    
-                    console.log('[ChatManager.saveChat] this.chat을 사용하여 messages 복구 (병합 포함):', {
-                        messagesCount: messages.length,
-                        chatArrayLength: this.chat.length,
-                        existingMessagesCount: existingMessages.length
-                    });
-                } else {
-                    // this.chat을 사용하도록 수정
-                    messages = [...this.chat];
-                    messageCount = messages.length;
-                    console.log('[ChatManager.saveChat] this.chat을 사용하여 messages 복구:', {
-                        messagesCount: messages.length
-                    });
                 }
+                messageCount = messages.length;
+                
+                console.log('[ChatManager.saveChat] this.chat을 사용하여 messages 복구:', {
+                    messagesCount: messages.length,
+                    chatArrayLength: this.chat.length,
+                    deletedMessageCount: this._deletedMessageUuids ? this._deletedMessageUuids.size : 0
+                });
             }
             
             // 필터링된 existingMessages 길이 계산 (삭제된 메시지 제외)
@@ -5545,6 +5562,12 @@ class ChatManager {
                     }
                 }
                 
+                // ⚠️ 중요: 불러온 채팅의 경우 유저 메시지의 원본 이름 보존
+                // 불러온 채팅이 아니면 originalUserName을 전달하지 않아 현재 페르소나 이름 사용
+                const originalUserName = (this.chat_metadata?.isImported && message.is_user && message.name) 
+                    ? message.name 
+                    : null;
+                
                 const wrapper = await this.addMessage(
                     message.mes,
                     message.is_user ? 'user' : 'assistant',
@@ -5554,7 +5577,8 @@ class ChatManager {
                     0,
                     message.is_user ? userAvatar : null,
                     sendDate || null, // send_date 전달
-                    message.extra?.reasoning || null // 추론 내용 복원
+                    message.extra?.reasoning || null, // 추론 내용 복원
+                    originalUserName // 불러온 채팅의 원본 유저 이름
                 );
                 
                 // 실리태번과 동일: 저장된 UUID와 send_date를 DOM에 복원 (구 메시지 호환)
@@ -5793,7 +5817,45 @@ class ChatManager {
         }
 
         const characterName = character?.data?.name || character?.name || 'Character';
-        const chatName = `${characterName} - ${humanizedDateTime()}`;
+        let chatName = `${characterName} - ${humanizedDateTime()}`;
+        
+        // ⚠️ 중요: 같은 제목(chatName)인 채팅이 있는지 확인하여 중복 방지
+        // 같은 characterId이고 같은 chatName인 채팅이 있으면 제목에 숫자 추가
+        // ChatStorage - 전역 스코프에서 사용
+        const allChats = await ChatStorage.loadAll();
+        
+        // 같은 제목인 채팅 찾기 (같은 캐릭터의 채팅만 확인)
+        const duplicateNameChats = Object.values(allChats)
+            .filter(chat => {
+                if (!chat || chat === null) return false;
+                // 같은 캐릭터의 채팅만 확인
+                const chatCharId = chat.characterId || chat.metadata?.characterId;
+                if (chatCharId !== characterId) return false;
+                // 같은 제목인지 확인
+                return chat.chatName === chatName;
+            });
+        
+        // 같은 제목인 채팅이 있으면 제목에 숫자 추가
+        if (duplicateNameChats.length > 0) {
+            const originalChatName = chatName; // 원본 제목 저장
+            let counter = 2;
+            let candidateName = `${originalChatName} (${counter})`;
+            // allChats에서 직접 확인하여 더 안전하게 처리
+            while (Object.values(allChats).some(chat => {
+                if (!chat || chat === null) return false;
+                const chatCharId = chat.characterId || chat.metadata?.characterId;
+                return chatCharId === characterId && chat.chatName === candidateName;
+            })) {
+                counter++;
+                candidateName = `${originalChatName} (${counter})`;
+            }
+            chatName = candidateName;
+            console.log('[ChatManager.createNewChat] 같은 제목의 채팅 발견, 제목 수정:', {
+                originalChatName: originalChatName,
+                newChatName: candidateName,
+                duplicateCount: duplicateNameChats.length
+            });
+        }
         
         // 채팅 초기화
         this.elements.chatMessages.innerHTML = '';

@@ -315,41 +315,60 @@ async function importChat(file) {
         
         // 메시지 변환: send_date 파싱 및 형식 변환
         const convertedMessages = messages.map(msg => {
-            const converted = {
-                ...msg,
-                send_date: parseSillyTavernSendDate(msg.send_date),
-                uuid: msg.uuid || null, // UUID가 없으면 null
-            };
-            
-            // 실리태번 형식: name, is_user 필드가 있음
-            // 우리 형식과 호환되도록 유지 (loadChat에서 처리)
-            
-            // 유저 메시지이고 현재 페르소나 이름과 일치하면 아바타 이미지 업데이트
-            if (converted.is_user && currentPersona) {
-                const userName = converted.name || '';
-                const personaName = currentPersona.name || '';
+            try {
+                const converted = {
+                    ...msg,
+                    send_date: parseSillyTavernSendDate(msg.send_date),
+                    uuid: msg.uuid || null, // UUID가 없으면 null
+                };
                 
-                // 이름이 일치하고 페르소나에 아바타가 있으면 force_avatar 업데이트
-                // 중요: 페르소나 아바타는 반드시 실제 이미지 URL (data:, http://, https://)로 저장
-                if (userName === personaName && currentPersona.avatar) {
-                    // 페르소나 아바타가 실제 URL 형식인지 확인
-                    if (currentPersona.avatar.startsWith('data:') || 
-                        currentPersona.avatar.startsWith('http://') || 
-                        currentPersona.avatar.startsWith('https://')) {
-                        converted.force_avatar = currentPersona.avatar;
-                        console.debug('[importChat] 페르소나 아바타 업데이트:', {
-                            userName,
-                            personaName,
-                            avatarUrl: currentPersona.avatar.substring(0, 50)
-                        });
-                    } else {
-                        // 아바타가 URL 형식이 아니면 저장하지 않음 (loadChat에서 처리)
-                        console.debug('[importChat] 페르소나 아바타가 URL 형식이 아님, loadChat에서 처리:', currentPersona.avatar.substring(0, 50));
+                // 실리태번 형식: name, is_user 필드가 있음
+                // 우리 형식과 호환되도록 유지 (loadChat에서 처리)
+                
+                // 유저 메시지이고 현재 페르소나 이름과 일치하면 아바타 이미지 업데이트
+                if (converted.is_user && currentPersona) {
+                    const userName = converted.name || '';
+                    const personaName = currentPersona.name || '';
+                    
+                    // 이름이 일치하고 페르소나에 아바타가 있으면 force_avatar 업데이트
+                    // 중요: 페르소나 아바타는 반드시 실제 이미지 URL (data:, http://, https://)로 저장
+                    if (userName === personaName && currentPersona.avatar) {
+                        // 페르소나 아바타가 실제 URL 형식인지 확인
+                        if (currentPersona.avatar.startsWith('data:') || 
+                            currentPersona.avatar.startsWith('http://') || 
+                            currentPersona.avatar.startsWith('https://')) {
+                            converted.force_avatar = currentPersona.avatar;
+                            console.debug('[importChat] 페르소나 아바타 업데이트:', {
+                                userName,
+                                personaName,
+                                avatarUrl: currentPersona.avatar.substring(0, 50)
+                            });
+                        } else {
+                            // 아바타가 URL 형식이 아니면 저장하지 않음 (loadChat에서 처리)
+                            console.debug('[importChat] 페르소나 아바타가 URL 형식이 아님, loadChat에서 처리:', currentPersona.avatar.substring(0, 50));
+                        }
                     }
                 }
+                
+                return converted;
+            } catch (error) {
+                // 메시지 변환 실패 시 경고 로그 출력 후 원본 메시지 반환
+                console.warn('[importChat] 메시지 변환 실패, 원본 메시지 사용:', error, msg);
+                if (typeof showErrorCodeToast === 'function') {
+                    showErrorCodeToast('WARN_FILE_20008', `메시지 변환 실패: ${error.message}`);
+                }
+                return {
+                    ...msg,
+                    send_date: msg.send_date ? parseSillyTavernSendDate(msg.send_date) : Date.now(),
+                    uuid: msg.uuid || null,
+                };
             }
-            
-            return converted;
+        }).filter(msg => msg !== null && msg !== undefined); // null/undefined 메시지 제거
+        
+        console.log('[importChat] 메시지 변환 완료:', {
+            originalMessageCount: messages.length,
+            convertedMessageCount: convertedMessages.length,
+            characterName: characterName
         });
         
         // 실리태번 JSONL 파일은 메시지가 이미 시간 순서로 저장되어 있음
@@ -403,8 +422,46 @@ async function importChat(file) {
             : `Imported Chat - ${humanizedDateTime()}`;
         }
         
-        // 채팅 ID 생성: 원본 채팅의 create_date와 character_name을 사용하여 일관된 ID 생성
-        // 같은 채팅을 다시 불러와도 같은 ID가 생성되도록 함
+        // ⚠️ 중요: 같은 제목(chatName)인 채팅이 있는지 확인하여 중복 방지
+        // 같은 characterId이고 같은 chatName인 채팅이 있으면 제목에 숫자 추가
+        // ChatStorage - 전역 스코프에서 사용
+        const allChats = await ChatStorage.loadAll();
+        
+        // 같은 제목인 채팅 찾기 (같은 캐릭터의 채팅만 확인)
+        const duplicateNameChats = Object.values(allChats)
+            .filter(chat => {
+                if (!chat || chat === null) return false;
+                // 같은 캐릭터의 채팅만 확인
+                const chatCharId = chat.characterId || chat.metadata?.characterId;
+                if (chatCharId !== characterId) return false;
+                // 같은 제목인지 확인
+                return chat.chatName === chatName;
+            });
+        
+        // 같은 제목인 채팅이 있으면 제목에 숫자 추가
+        let finalChatName = chatName;
+        if (duplicateNameChats.length > 0) {
+            const originalChatName = chatName; // 원본 제목 저장
+            let counter = 2;
+            let candidateName = `${originalChatName} (${counter})`;
+            // allChats에서 직접 확인하여 더 안전하게 처리
+            while (Object.values(allChats).some(chat => {
+                if (!chat || chat === null) return false;
+                const chatCharId = chat.characterId || chat.metadata?.characterId;
+                return chatCharId === characterId && chat.chatName === candidateName;
+            })) {
+                counter++;
+                candidateName = `${originalChatName} (${counter})`;
+            }
+            finalChatName = candidateName;
+            console.log('[importChat] 같은 제목의 채팅 발견, 제목 수정:', {
+                originalChatName: originalChatName,
+                newChatName: finalChatName,
+                duplicateCount: duplicateNameChats.length
+            });
+        }
+        
+        // chatId 생성: 중복 방지된 제목 사용
         let chatId = '';
         if (characterId) {
             // 원본 create_date를 ID에 포함하여 중복 방지
@@ -433,15 +490,14 @@ async function importChat(file) {
                 dateSuffix = messageHash.replace(/[^0-9]/g, '').substring(0, 14) || Date.now().toString().substring(0, 14);
             }
             
-            const baseName = chatName.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+            // 중복 방지된 제목 사용
+            const baseName = finalChatName.replace(/[^a-zA-Z0-9가-힣]/g, '_');
             chatId = `${characterId}_${baseName}_${dateSuffix}`;
         } else {
             chatId = generateChatId(metadata, file.name);
         }
         
         // 중복 채팅 확인: 같은 chatId 또는 비슷한 채팅 찾기
-        // ChatStorage - 전역 스코프에서 사용
-        const allChats = await ChatStorage.loadAll();
         
         // 1. 같은 chatId가 있는지 확인 (삭제된 채팅 제외)
         const existingChatById = allChats[chatId];
@@ -527,7 +583,7 @@ async function importChat(file) {
         const importedDate = Date.now(); // 불러온 시간
         const chatData = {
             characterId: characterId, // 없으면 null
-            chatName: chatName,
+            chatName: finalChatName, // 중복 방지된 제목 사용
             metadata: {
                 user_name: metadata.user_name || 'User',
                 character_name: characterName,
@@ -543,6 +599,27 @@ async function importChat(file) {
         
         // 채팅 저장
         await ChatStorage.save(chatId, chatData);
+        
+        // 저장 후 검증: 저장된 메시지 수 확인
+        const savedChatData = await ChatStorage.load(chatId);
+        const savedMessageCount = savedChatData?.messages?.length || 0;
+        
+        if (savedMessageCount !== convertedMessages.length) {
+            console.error('[importChat] ⚠️ 메시지 수 불일치:', {
+                expectedCount: convertedMessages.length,
+                savedCount: savedMessageCount,
+                chatId: chatId.substring(0, 50)
+            });
+            if (typeof showErrorCodeToast === 'function') {
+                showErrorCodeToast('WARN_FILE_20009', `메시지 저장 불일치: 예상 ${convertedMessages.length}개, 저장 ${savedMessageCount}개`);
+            }
+        } else {
+            console.log('[importChat] ✅ 채팅 저장 완료:', {
+                chatId: chatId.substring(0, 50),
+                messageCount: savedMessageCount,
+                characterName: characterName
+            });
+        }
         
         return {
             success: true,

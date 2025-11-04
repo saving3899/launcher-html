@@ -261,18 +261,56 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
             }
         }
         
-        const hasGreeting = chatHistory.some(m => m.role === 'assistant' && m.content && m.content.trim());
+        // ⚠️ 중요: DOM에 그리팅이 있는지 확인 (더보기로 숨겨진 메시지는 확인하지 않음)
+        const hasGreetingInDOM = chatHistory.some(m => m.role === 'assistant' && m.content && m.content.trim());
+        
+        // ⚠️ 중요: this.chat 배열에서 첫 번째 메시지가 assistant인지 확인 (더보기로 숨겨진 메시지도 확인)
+        // 불러온 채팅의 경우 더보기로 숨겨진 그리팅이 있을 수 있으므로 this.chat 배열도 확인해야 함
+        let hasGreetingInChat = false;
+        if (chatManager.chat && chatManager.chat.length > 0) {
+            // 첫 번째 메시지가 assistant 메시지인지 확인
+            const firstMessage = chatManager.chat[0];
+            if (firstMessage && !firstMessage.is_user && firstMessage.mes && firstMessage.mes.trim()) {
+                hasGreetingInChat = true;
+            }
+        }
+        
+        // IndexedDB에서도 첫 번째 메시지 확인 (더보기로 숨겨진 메시지도 확인)
+        let hasGreetingInStorage = false;
+        if (chatManager.currentChatId && !messageDeletedRecently && hasStoredMessages) {
+            try {
+                // ChatStorage - 전역 스코프에서 사용
+                const storedChatData = await ChatStorage.load(chatManager.currentChatId);
+                if (storedChatData && storedChatData.messages && storedChatData.messages.length > 0) {
+                    // 첫 번째 메시지가 assistant 메시지인지 확인
+                    const firstStoredMessage = storedChatData.messages[0];
+                    if (firstStoredMessage && !firstStoredMessage.is_user && firstStoredMessage.mes && firstStoredMessage.mes.trim()) {
+                        hasGreetingInStorage = true;
+                    }
+                }
+            } catch (error) {
+                // 오류가 발생해도 계속 진행
+                console.debug('[AIMessageSender] 저장된 채팅 확인 중 오류 (무시):', error);
+            }
+        }
+        
+        // 그리팅이 있는지 확인 (DOM, this.chat, IndexedDB 모두 확인)
+        const hasGreeting = hasGreetingInDOM || hasGreetingInChat || hasGreetingInStorage;
         
         // 그리팅 추가 조건:
-        // 1. DOM에 그리팅이 없고
+        // 1. DOM, this.chat, IndexedDB 모두에 그리팅이 없고
         // 2. 메시지가 최근에 삭제되지 않았고
         // 3. IndexedDB에 저장된 메시지가 없을 때 (완전히 새로운 채팅일 때만)
         // 4. 메시지가 0개일 때만 그리팅 추가 (메시지가 1개 이상이면 이미 채팅이 진행 중이므로 그리팅 추가 안 함)
         const shouldAddGreeting = !hasGreeting && !messageDeletedRecently && !hasStoredMessages && chatHistory.length === 0;
         
         console.log('[AIMessageSender] 그리팅 체크:', {
+            hasGreetingInDOM,
+            hasGreetingInChat,
+            hasGreetingInStorage,
             hasGreeting,
             chatHistoryLength: chatHistory.length,
+            chatArrayLength: chatManager.chat?.length || 0,
             messageDeletedRecently,
             hasStoredMessages,
             currentChatId: chatManager.currentChatId,

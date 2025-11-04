@@ -204,11 +204,42 @@ class FileManager {
                     
                     // 캐릭터가 있으면 자동으로 채팅 로드
                     if (result.hasCharacter && result.characterId) {
-                        // 해당 캐릭터 선택
+                        // ⚠️ 중요: 불러온 채팅을 로드할 때는 selectCharacter를 호출하지 않음
+                        // 이유: selectCharacter가 loadOrCreateChat을 호출하여 기존 채팅을 저장하는데,
+                        // 이 시점에 currentChatId가 null이라 빈 채팅이 저장됨
+                        // 대신 캐릭터 선택 상태와 UI만 업데이트하고 직접 loadChat 호출
+                        
+                        // 캐릭터 선택 상태 및 UI 업데이트 (채팅 저장 없이)
                         if (window.characterManager) {
-                            await window.characterManager.selectCharacter(result.characterId);
+                            const character = await CharacterStorage.load(result.characterId);
+                            if (character) {
+                                // 캐릭터 선택 상태 업데이트 (SettingsStorage에 저장)
+                                await CharacterStorage.saveCurrent(result.characterId);
+                                
+                                // UI 업데이트 (selectCharacter의 일부 기능만 수행)
+                                const name = character?.data?.name || character?.name || result.characterId;
+                                if (window.characterManager.elements && window.characterManager.elements.charName) {
+                                    window.characterManager.elements.charName.textContent = name;
+                                }
+                                
+                                // 채팅 목록 버튼 표시
+                                if (window.characterManager.elements && window.characterManager.elements.chatListBtn) {
+                                    window.characterManager.elements.chatListBtn.classList.remove('hidden');
+                                }
+                                
+                                // 프로필 버튼 표시
+                                if (window.characterManager.elements && window.characterManager.elements.profileBtn) {
+                                    window.characterManager.elements.profileBtn.classList.remove('hidden');
+                                }
+                                
+                                // 채팅 관리자에 캐릭터 ID 설정 (loadChat에서 필요)
+                                window.chatManager.currentCharacterId = result.characterId;
+                            }
                         }
-                        // 채팅 로드
+                        
+                        // 채팅 로드 (불러온 채팅 로드)
+                        // ⚠️ 중요: loadChat이 호출되기 전에 currentChatId를 null로 유지하여
+                        // 불러온 채팅이 로드되기 전에 saveChat이 호출되어도 빈 채팅이 저장되지 않도록 함
                         await window.chatManager.loadChat(result.chatId);
                         showToast(`채팅 불러오기 완료! 파일: ${file.name}, 메시지: ${result.messageCount}개`, 'success');
                     } else {

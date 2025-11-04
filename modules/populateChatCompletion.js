@@ -473,10 +473,11 @@ async function populateChatHistory(messages, prompts, chatCompletion, type = nul
     }
     
     // 실리태번과 동일: Insert chat messages (840-886번 라인)
-    // 중요: reverse()를 사용하지 않고 원래 순서대로 처리
-    // 이유: insertAtStart()를 사용하므로 역순 처리가 필요 없음
-    // 대필 요청의 경우: [그리팅, 대필지시문] 순서를 유지해야 함
-    const chatPool = [...messages]; // reverse() 제거
+    // ⚠️ 중요: 프롬프트 전송 시에만 역순 처리 (최근 메시지부터 추가)
+    // 이유: 토큰 예산 초과 시 과거 메시지가 밀려나도록 하기 위함
+    // 대필 요청의 경우: [그리팅, 대필지시문] 순서를 유지해야 하지만, 
+    // 역순 처리 후 insertAtStart()를 사용하면 최종 순서는 [그리팅, 대필지시문]이 됨
+    const chatPool = [...messages].reverse(); // 역순 처리: 최근 메시지부터
     let addedCount = 0;
     for (let index = 0; index < chatPool.length; index++) {
         const chatPrompt = chatPool[index];
@@ -587,10 +588,10 @@ async function populateChatHistory(messages, prompts, chatCompletion, type = nul
                 );
                 
                 // 현재 메시지 앞에 atDepth 메시지 삽입
-                // 중요: insertAtEnd()를 사용하므로, atDepth를 먼저 추가하고 그 다음에 일반 메시지를 추가
-                // 이렇게 하면 최종 순서는 [atDepth, 일반메시지]가 됨
+                // ⚠️ 중요: insertAtStart()를 사용하여 역순 처리된 chatPool과 일관성 유지
+                // atDepth를 먼저 추가하고 그 다음에 일반 메시지를 추가하면 최종 순서는 [atDepth, 일반메시지]가 됨
                 if (chatCompletion.canAfford(atDepthMessage)) {
-                    chatCompletion.insertAtEnd(atDepthMessage, 'chatHistory');
+                    chatCompletion.insertAtStart(atDepthMessage, 'chatHistory');
                     atDepthEntry.inserted = true; // 삽입 완료 표시
                 } else {
                     // 경고 코드 토스트 알림 표시
@@ -643,10 +644,11 @@ async function populateChatHistory(messages, prompts, chatCompletion, type = nul
         // NONE 모드는 아무 처리 안 함
 
         // 실리태번과 동일: 토큰 예산 확인 후 추가 (881-885번 라인)
-        // 중요: insertAtEnd()를 사용하여 메시지 순서 유지
-        // [그리팅, 대필지시문] 순서로 입력되면 [그리팅, 대필지시문] 순서로 추가됨
+        // ⚠️ 중요: insertAtStart()를 사용하여 최근 메시지부터 추가
+        // 역순 처리된 chatPool을 insertAtStart()로 추가하면 최종 순서는 [과거...최근]이 됨
+        // [그리팅, 대필지시문] 순서로 입력되어도 insertAtStart()로 추가되면 최종 순서는 [그리팅, 대필지시문]이 됨
         if (chatCompletion.canAfford(chatMessage)) {
-            chatCompletion.insertAtEnd(chatMessage, 'chatHistory');
+            chatCompletion.insertAtStart(chatMessage, 'chatHistory');
             addedCount++;
         } else {
             // 경고 코드 토스트 알림 표시

@@ -337,6 +337,7 @@ class MobileChatApp {
         messageInput.style.overflow = 'hidden';
         messageInput.style.minHeight = '44px';
         messageInput.style.maxHeight = '40vh';
+        messageInput.style.maxHeight = '40dvh';
         
         const adjustHeight = () => {
             const value = messageInput.value || '';
@@ -363,10 +364,11 @@ class MobileChatApp {
             }
             
             // 여러 줄인 경우에만 scrollHeight 측정
-            // 높이를 auto로 설정하여 scrollHeight 정확히 측정
-            messageInput.style.height = 'auto';
+            // iOS Safari 호환: height를 1px로 리셋하여 강제 리플로우 유발
+            const originalHeight = messageInput.style.height;
+            messageInput.style.height = '1px';
             
-            // scrollHeight 측정
+            // scrollHeight 측정 (iOS Safari에서 정확한 측정을 위해)
             const scrollHeight = messageInput.scrollHeight;
             
             // 최소/최대 높이 적용
