@@ -164,7 +164,7 @@ class PresetManager {
             'streaming_kobold',
             'enabled',
             'bind_to_context',
-            'seed',
+            // 'seed'는 프리셋 모달 안에 있는 설정이므로 프리셋에 저장되어야 함 (제외하지 않음)
             'legacy_api',
             'mancer_model',
             'togetherai_model',
@@ -199,6 +199,11 @@ class PresetManager {
             'currentPersonaId',    // 프리셋은 페르소나와 무관해야 함
             'persona_description', // 프리셋은 페르소나와 무관해야 함
             'persona_description_position', // 프리셋은 페르소나와 무관해야 함
+            // ⚠️ 중요: 프리셋에 저장하지 않을 필드 (효과음 설정 - 사용자별 설정이므로 프리셋과 무관)
+            'play_message_sound',  // 효과음 재생 설정
+            'play_sound_unfocused', // 백그라운드 효과음 재생 설정
+            'current_sound_id',    // 현재 선택된 효과음 ID
+            'message_send_key',    // 메시지 전송 키보드 단축키 설정
         ];
 
         const filtered = { ...settings };
@@ -438,6 +443,21 @@ class PresetManager {
         mergedSettings.apiKeys = restCurrentSettings.apiKeys;
         mergedSettings.apiModels = restCurrentSettings.apiModels;
         
+        // 효과음 설정은 프리셋과 무관하므로 항상 현재 설정 유지
+        // 중요: 프리셋을 불러와도 사용자가 설정한 효과음 설정은 유지되어야 함
+        if (restCurrentSettings.play_message_sound !== undefined) {
+            mergedSettings.play_message_sound = restCurrentSettings.play_message_sound;
+        }
+        if (restCurrentSettings.play_sound_unfocused !== undefined) {
+            mergedSettings.play_sound_unfocused = restCurrentSettings.play_sound_unfocused;
+        }
+        if (restCurrentSettings.current_sound_id !== undefined) {
+            mergedSettings.current_sound_id = restCurrentSettings.current_sound_id;
+        }
+        if (restCurrentSettings.message_send_key !== undefined) {
+            mergedSettings.message_send_key = restCurrentSettings.message_send_key;
+        }
+        
         // prompts와 prompt_order 처리
         // Default 프리셋인 경우:
         // - 저장소에 프리셋이 있고 prompts/prompt_order가 있으면 그 값을 사용 (사용자가 저장한 상태)
@@ -498,7 +518,12 @@ class PresetManager {
         const { skipUpdate = false, skipToast = false } = options;
         
         // Preset 데이터 준비
-        const presetData = data || await this.getPresetSettings();
+        let presetData = data || await this.getPresetSettings();
+        
+        // ⚠️ 중요: 항상 필터링 적용 (data가 직접 제공된 경우에도)
+        // getPresetSettings()는 이미 필터링을 적용하지만, data가 직접 제공된 경우
+        // (importPreset 등에서 외부 파일을 가져올 때) 필터링되지 않는 문제 방지
+        presetData = this.filterPresetSettings(presetData);
         
         // 이름 추가
         presetData.name = name;
