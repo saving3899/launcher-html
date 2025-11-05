@@ -2411,6 +2411,11 @@ async function setupPromptsPanelEvents(panelContainer) {
             // 중요: 프리셋을 불러와도 사용자가 입력한 API 키와 모델은 유지되어야 함
             apiKeys: currentSettings.apiKeys,
             apiModels: currentSettings.apiModels,
+            // 페르소나 정보는 프리셋을 무시하고 항상 현재 설정 유지
+            // 중요: 프리셋을 불러와도 현재 선택된 페르소나는 유지되어야 함
+            currentPersonaId: currentSettings.currentPersonaId,
+            persona_description: currentSettings.persona_description || '',
+            persona_description_position: currentSettings.persona_description_position ?? 0,
         };
         
         // 프롬프트도 포함
@@ -2548,7 +2553,11 @@ async function setupPromptsPanelEvents(panelContainer) {
             if (userSelectedApiProvider && userSelectedApiProvider !== currentApiProviderAfter) {
                 await SettingsStorage.save({
                     ...currentSettingsAfter,
-                    apiProvider: userSelectedApiProvider
+                    apiProvider: userSelectedApiProvider,
+                    // 페르소나 정보 보존 (프리셋 변경 시에도 유지)
+                    currentPersonaId: currentSettingsAfter.currentPersonaId,
+                    persona_description: currentSettingsAfter.persona_description || '',
+                    persona_description_position: currentSettingsAfter.persona_description_position ?? 0,
                 });
             }
             
@@ -2980,6 +2989,18 @@ async function setupPromptsPanelEvents(panelContainer) {
                 // activeCharacter 설정 (토큰 계산용)
                 promptManager.activeCharacter = { ...character, id: currentCharacterId };
                 
+                // 페르소나 이름 가져오기 ({{user}} 치환용)
+                // SettingsStorage, UserPersonaStorage - 전역 스코프에서 사용
+                let userName = 'User';
+                const currentPersonaId = settings.currentPersonaId;
+                if (currentPersonaId) {
+                    // UserPersonaStorage - 전역 스코프에서 사용
+                    const persona = await UserPersonaStorage.load(currentPersonaId);
+                    if (persona && persona.name) {
+                        userName = persona.name;
+                    }
+                }
+                
                 // 토큰 카운팅 함수 생성 (실리태번과 동일)
                 // promptManager.countTokensAsync 사용
                 const tokenCountFn = async (message) => {
@@ -3016,7 +3037,7 @@ async function setupPromptsPanelEvents(panelContainer) {
                         {
                             character,
                             chatMetadata: {},
-                            name1: 'User',
+                            name1: userName,
                             name2: character.name || 'Character',
                             additionalOptions: {
                                 messages: chatHistoryMessages, // 채팅 히스토리 전달

@@ -9,24 +9,35 @@ const DEFAULT_AUTOFILL_PROMPT = 'You are {{user}}. Next story development: {{대
 /**
  * 대필 히스토리 저장 (최대 5개)
  * @param {string} content - 대필 내용
+ * @returns {Promise<boolean>} 저장 성공 여부
  */
 async function saveAutofillHistory(content) {
-    if (!content || !content.trim()) return;
-    
-    const settings = await SettingsStorage.load();
-    const history = settings.autofill_history || [];
-    
-    // 중복 제거 (같은 내용이 있으면 제거)
-    const filteredHistory = history.filter(item => item !== content);
-    
-    // 최신 항목을 맨 앞에 추가
-    filteredHistory.unshift(content);
-    
-    // 최대 5개만 유지
-    const trimmedHistory = filteredHistory.slice(0, 5);
-    
-    settings.autofill_history = trimmedHistory;
-    await SettingsStorage.save(settings);
+    try {
+        if (!content || !content.trim()) {
+            return false;
+        }
+        
+        const settings = await SettingsStorage.load();
+        const history = settings.autofill_history || [];
+        
+        // 중복 제거 (같은 내용이 있으면 제거)
+        const filteredHistory = history.filter(item => item !== content);
+        
+        // 최신 항목을 맨 앞에 추가
+        filteredHistory.unshift(content);
+        
+        // 최대 5개만 유지
+        const trimmedHistory = filteredHistory.slice(0, 5);
+        
+        settings.autofill_history = trimmedHistory;
+        await SettingsStorage.save(settings);
+        
+        return true;
+    } catch (error) {
+        // 저장 실패 시 조용히 처리 (토스트 알림 없음)
+        console.debug('[AutofillModal] 대필 히스토리 저장 실패:', error);
+        return false;
+    }
 }
 
 /**
@@ -232,8 +243,13 @@ async function setupAutofillModalEvents(container, onSubmit, onCancel) {
             }
             
             try {
-                // 대필 실행 전에 히스토리에 저장
-                await saveAutofillHistory(content);
+                // 대필 실행 전에 히스토리에 저장 (저장 실패해도 대필은 계속 진행)
+                const historySaved = await saveAutofillHistory(content);
+                if (!historySaved) {
+                    // 히스토리 저장 실패는 경고만 표시하고 계속 진행
+                    console.warn('[AutofillModal] 대필 히스토리 저장 실패, 대필은 계속 진행됩니다.');
+                }
+                
                 await onSubmit(finalPrompt, content);
             } catch (error) {
                 // 오류 코드 토스트 알림 표시

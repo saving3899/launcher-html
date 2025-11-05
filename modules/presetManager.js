@@ -193,9 +193,12 @@ class PresetManager {
             'auto_expand',
             'show_hidden',
             'max_additions',
-            // ⚠️ 중요: 프리셋에 저장하지 않을 필드 (캐릭터/채팅 관련)
+            // ⚠️ 중요: 프리셋에 저장하지 않을 필드 (캐릭터/채팅/페르소나 관련)
             'currentCharacterId',  // 프리셋은 캐릭터와 무관해야 함
             'currentChatId',       // 프리셋은 채팅과 무관해야 함
+            'currentPersonaId',    // 프리셋은 페르소나와 무관해야 함
+            'persona_description', // 프리셋은 페르소나와 무관해야 함
+            'persona_description_position', // 프리셋은 페르소나와 무관해야 함
         ];
 
         const filtered = { ...settings };
