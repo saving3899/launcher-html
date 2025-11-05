@@ -4322,11 +4322,6 @@ class ChatManager {
                 if (this.currentChatId && existingChatData && existingChatData.messages && existingChatData.messages.length > 0) {
                     // 병합 로직을 거치기 위해 DOM 수집 경로로 이동
                     // (실제로는 this.chat을 사용하지만, existingMessages와 병합하여 삭제된 메시지 제외)
-                    console.log('[ChatManager.saveChat] 기존 채팅이 있으므로 병합 로직 사용:', {
-                        chatArrayLength: this.chat.length,
-                        existingMessageCount: existingChatData.messages.length,
-                        currentChatId: this.currentChatId.substring(0, 30)
-                    });
                     // DOM 수집 경로로 이동하여 병합 로직 사용
                     // (실제로는 this.chat을 domMessages로 사용)
                     // messages는 아직 설정하지 않음 (아래 병합 로직에서 처리)
@@ -4336,11 +4331,6 @@ class ChatManager {
                     // 하지만 existingChatData가 있으면 병합 로직을 거쳐야 함 (삭제된 메시지 제외)
                     if (existingChatData && existingChatData.messages && existingChatData.messages.length > 0) {
                         // 병합 로직 경로로 이동 (아래에서 처리)
-                        console.debug('[ChatManager.saveChat] 기존 채팅이 있으므로 병합 로직 사용 (this.chat 경로):', {
-                            chatArrayLength: this.chat.length,
-                            existingMessageCount: existingChatData.messages.length,
-                            currentChatId: this.currentChatId?.substring(0, 30) || 'null'
-                        });
                     } else {
                         messages = [...this.chat];
                         console.debug('[ChatManager.saveChat] ✅ this.chat 배열을 소스로 사용 (실리태번 방식):', {
@@ -5437,10 +5427,19 @@ class ChatManager {
         // 이유: addMessage에서 정규식을 적용하려면 this.currentCharacterId가 필요함
         // loadChat이 직접 호출되는 경우(채팅 목록에서 선택 등)에도 정규식이 적용되도록 함
         // 이전에 제거했던 이유: 비동기 작업 중 다른 캐릭터 선택 가능성
+        // ⚠️ 중요: chatData.characterId를 사용하여 currentCharacterId 설정
+        // 불러온 채팅의 경우 원본 캐릭터 ID를 유지해야 함 (다른 캐릭터로 매칭되지 않도록)
         // 하지만 addMessage에서 정규식 적용을 위해 필요하므로 복원
         // 대안: addMessage에 characterId 매개변수 추가 (더 큰 수정 필요)
         this.currentCharacterId = chatData.characterId;
         this.chatCreateDate = chatData.metadata.create_date || Date.now();
+        
+        console.debug('[ChatManager.loadChat] characterId 설정:', {
+            chatDataCharacterId: chatData.characterId,
+            currentCharacterId: this.currentCharacterId,
+            chatId: chatId?.substring(0, 50),
+            characterName: chatData.metadata?.character_name || '(unknown)'
+        });
         
         // ⚠️ [실리태번 방식으로 변경] 불러온 채팅도 일반 채팅과 동일하게 처리
         // 실리태번은 불러온 채팅에 특별한 플래그를 추가하지 않으며, chat.length === 0 조건만으로 그리팅 추가 여부를 결정합니다.
@@ -5866,16 +5865,27 @@ class ChatManager {
             });
         }
 
-        // 규칙 5: 메시지가 0개인 채팅을 새로고침하거나 다른 곳에서 돌아오면 그리팅 추가
-        // ⚠️ [실리태번 방식으로 변경] chat.length === 0 조건만으로 그리팅 추가 여부 결정
-        // 실리태번은 불러온 채팅과 일반 채팅을 구분하지 않으며, 단순히 메시지가 없으면 그리팅을 추가합니다.
-        // 불러온 채팅은 이미 메시지가 있으므로 자동으로 그리팅이 추가되지 않습니다.
+        // ⚠️ [실리태번 방식] chat.length === 0 조건만으로 그리팅 추가 여부 결정
+        // 실리태번 getChatResult(): if (chat.length === 0) { chat.push(getFirstMessage()); }
+        // 실리태번은 실제 chat 배열의 길이만 확인합니다.
+        // 중요: this.chat은 이미 messages로 채워져 있으므로, 불러온 채팅은 this.chat.length > 0이므로 그리팅이 추가되지 않음
+        // ⚠️ 중요: messages 변수도 확인 (this.chat이 어딘가에서 초기화되었을 수 있음)
         // 기존 코드 (주석 처리):
-        // const isImportedChat = chatData.metadata?.isImported === true;
-        // const storedMessageCount = chatData.messages ? chatData.messages.length : 0;
-        // if (!isImportedChat && isEmptyChat && messages.length === 0 && storedMessageCount === 0) {
-        // 실리태번 방식: messages.length === 0 조건만 확인
-        if (isEmptyChat && messages.length === 0) {
+        // if (isEmptyChat && messages.length === 0) {
+        // 실리태번 방식: this.chat.length === 0 조건만 확인 (messages도 함께 확인하여 안전성 확보)
+        console.debug('[ChatManager.loadChat] 그리팅 추가 조건 확인:', {
+            chatLength: this.chat.length,
+            messagesLength: messages.length,
+            chatId: chatId?.substring(0, 50),
+            firstMessage: this.chat.length > 0 ? { 
+                is_user: this.chat[0].is_user, 
+                mesPreview: this.chat[0].mes?.substring(0, 50),
+                uuid: this.chat[0].uuid?.substring(0, 8)
+            } : null,
+            willAddGreeting: this.chat.length === 0 && messages.length === 0
+        });
+        // ⚠️ 중요: this.chat과 messages 모두 확인 (this.chat이 어딘가에서 초기화되었을 수 있음)
+        if (this.chat.length === 0 && messages.length === 0) {
             // 캐릭터 정보 다시 가져오기 (최신 상태)
             // ⚠️ 중요: chatData.characterId를 사용 (this.currentCharacterId는 설정하지 않으므로 사용하지 않음)
             const latestCharacter = await CharacterStorage.load(chatCharacterId);
@@ -6919,6 +6929,9 @@ class ChatManager {
         }
         
         // 현재 채팅 ID 초기화 (새 채팅 시작)
+        // ⚠️ 중요: clearChat에서는 저장하지 않으므로, 그리팅 추가 시 저장이 트리거되지 않도록 플래그 설정
+        const wasLoadingChat = this._isLoadingChat;
+        this._isLoadingChat = true; // 그리팅 추가 시 자동 저장 방지
         
         this.currentChatId = null;
         this.currentChatName = null;
@@ -6973,6 +6986,9 @@ class ChatManager {
             welcomeMsg.innerHTML = '<p>캐릭터를 선택하고 채팅을 시작하세요.</p>';
             this.elements.chatMessages.appendChild(welcomeMsg);
         }
+        
+        // ⚠️ 중요: clearChat에서 설정한 플래그 복원 (그리팅 추가 시 자동 저장 방지 플래그 해제)
+        this._isLoadingChat = wasLoadingChat;
     }
 
     /**

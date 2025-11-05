@@ -491,8 +491,22 @@ async function importChat(file) {
             }
             
             // 중복 방지된 제목 사용
+            // ⚠️ 중요: chatId 생성 시 characterId 대신 원본 characterName 사용
+            // characterId는 findCharacterByName으로 찾은 값인데, 잘못된 캐릭터를 찾을 수 있음
+            // chatId에는 메타데이터의 원본 character_name을 사용하여 일관성 유지
             const baseName = finalChatName.replace(/[^a-zA-Z0-9가-힣]/g, '_');
-            chatId = `${characterId}_${baseName}_${dateSuffix}`;
+            // characterName을 sanitize하여 사용 (characterId 사용 안 함)
+            const sanitizedCharacterName = characterName.replace(/[^a-zA-Z0-9가-힣]/g, '_') || 'unknown';
+            chatId = `${sanitizedCharacterName}_${baseName}_${dateSuffix}`;
+            
+            console.debug('[importChat] chatId 생성:', {
+                characterName: characterName,
+                characterId: characterId,
+                sanitizedCharacterName: sanitizedCharacterName,
+                baseName: baseName,
+                dateSuffix: dateSuffix,
+                chatId: chatId.substring(0, 50)
+            });
         } else {
             chatId = generateChatId(metadata, file.name);
         }

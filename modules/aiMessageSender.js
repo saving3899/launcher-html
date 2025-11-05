@@ -340,13 +340,28 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
         // 그리팅이 있는지 확인 (DOM, this.chat, IndexedDB 모두 확인)
         const hasGreeting = hasGreetingInDOM || hasGreetingInChat || hasGreetingInStorage;
         
-        // ⚠️ [실리태번 방식으로 변경] chat.length === 0 조건만으로 그리팅 추가 여부 결정
-        // 실리태번은 불러온 채팅과 일반 채팅을 구분하지 않으며, 단순히 메시지가 없으면 그리팅을 추가합니다.
-        // 불러온 채팅은 이미 메시지가 있으므로 자동으로 그리팅이 추가되지 않습니다.
+        // ⚠️ [실리태번 방식] chat.length === 0 조건만으로 그리팅 추가 여부 결정
+        // 실리태번 getChatResult(): if (chat.length === 0) { chat.push(getFirstMessage()); }
+        // 실리태번은 실제 chat 배열의 길이만 확인합니다.
+        // ⚠️ 중요: 하지만 불러온 채팅의 경우 currentChatId가 있고 저장소에 메시지가 있으면 그리팅 추가 안 함
         // 기존 코드 (주석 처리):
-        // const shouldAddGreeting = !isImportedChat && !hasDomMessages && !hasChatMessages && chatHistory.length === 0 && !hasGreeting && !messageDeletedRecently && !hasStoredMessages;
-        // 실리태번 방식: chatHistory.length === 0 조건만 확인 (hasDomMessages, hasChatMessages는 이미 체크됨)
-        const shouldAddGreeting = !hasDomMessages && !hasChatMessages && chatHistory.length === 0 && !hasGreeting && !messageDeletedRecently && !hasStoredMessages;
+        // const shouldAddGreeting = !hasDomMessages && !hasChatMessages && chatHistory.length === 0 && !hasGreeting && !messageDeletedRecently && !hasStoredMessages;
+        // 실리태번 방식: chatManager.chat.length === 0 조건만 확인 (chatHistory는 빈 배열일 수 있음)
+        // 하지만 저장소에 메시지가 있으면 불러온 채팅이므로 그리팅 추가 안 함
+        const shouldAddGreeting = !hasChatMessages && !hasStoredMessages;
+        
+        console.debug('[AIMessageSender] 그리팅 추가 조건 확인:', {
+            hasChatMessages,
+            chatLength: chatManager.chat?.length || 0,
+            chatHistoryLength: chatHistory.length,
+            currentChatId: chatManager.currentChatId?.substring(0, 50),
+            firstMessage: chatManager.chat && chatManager.chat.length > 0 ? {
+                is_user: chatManager.chat[0].is_user,
+                mesPreview: chatManager.chat[0].mes?.substring(0, 50),
+                uuid: chatManager.chat[0].uuid?.substring(0, 8)
+            } : null,
+            willAddGreeting: shouldAddGreeting
+        });
         
         console.debug('[AIMessageSender] 그리팅 체크:', {
             hasDomMessages,

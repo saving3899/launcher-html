@@ -240,6 +240,28 @@ class FileManager {
                         // 채팅 로드 (불러온 채팅 로드)
                         // ⚠️ 중요: loadChat이 호출되기 전에 currentChatId를 null로 유지하여
                         // 불러온 채팅이 로드되기 전에 saveChat이 호출되어도 빈 채팅이 저장되지 않도록 함
+                        // ⚠️ 중요: loadChat에서 chatData.characterId를 사용하므로, 실제 저장된 characterId 확인
+                        const loadedChatData = await ChatStorage.load(result.chatId);
+                        if (loadedChatData && loadedChatData.characterId) {
+                            // 실제 저장된 characterId를 사용 (findCharacterByName이 잘못된 캐릭터를 찾았을 수 있음)
+                            console.debug('[FileManager] 불러온 채팅의 실제 characterId 확인:', {
+                                importFindCharacterId: result.characterId,
+                                savedCharacterId: loadedChatData.characterId,
+                                chatId: result.chatId?.substring(0, 50)
+                            });
+                            // 저장된 characterId가 다르면 UI 업데이트
+                            if (loadedChatData.characterId !== result.characterId) {
+                                const correctCharacter = await CharacterStorage.load(loadedChatData.characterId);
+                                if (correctCharacter) {
+                                    await CharacterStorage.saveCurrent(loadedChatData.characterId);
+                                    const name = correctCharacter?.data?.name || correctCharacter?.name || loadedChatData.characterId;
+                                    if (window.characterManager.elements && window.characterManager.elements.charName) {
+                                        window.characterManager.elements.charName.textContent = name;
+                                    }
+                                    window.chatManager.currentCharacterId = loadedChatData.characterId;
+                                }
+                            }
+                        }
                         await window.chatManager.loadChat(result.chatId);
                         showToast(`채팅 불러오기 완료! 파일: ${file.name}, 메시지: ${result.messageCount}개`, 'success');
                     } else {

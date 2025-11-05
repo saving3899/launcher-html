@@ -168,13 +168,26 @@ async function sendAIMessageForAutofill(userMessage, chatManager) {
     // 그리팅이 있는지 확인
     const hasGreeting = chatHistory.some(m => m.role === 'assistant' && m.content && m.content.trim());
     
-    // ⚠️ [실리태번 방식으로 변경] chat.length === 0 조건만으로 그리팅 추가 여부 결정
-    // 실리태번은 불러온 채팅과 일반 채팅을 구분하지 않으며, 단순히 메시지가 없으면 그리팅을 추가합니다.
-    // 불러온 채팅은 이미 메시지가 있으므로 자동으로 그리팅이 추가되지 않습니다.
+    // ⚠️ [실리태번 방식] chat.length === 0 조건만으로 그리팅 추가 여부 결정
+    // 실리태번 getChatResult(): if (chat.length === 0) { chat.push(getFirstMessage()); }
+    // 실리태번은 실제 chat 배열의 길이만 확인합니다.
+    // ⚠️ 중요: 하지만 불러온 채팅의 경우 currentChatId가 있고 저장소에 메시지가 있으면 그리팅 추가 안 함
     // 기존 코드 (주석 처리):
-    // if (!isImportedChat && !hasDomMessages && !hasChatMessages && chatHistory.length === 0 && !hasGreeting) {
-    // 실리태번 방식: hasDomMessages, hasChatMessages, chatHistory.length === 0 조건만 확인
-    if (!hasDomMessages && !hasChatMessages && chatHistory.length === 0 && !hasGreeting) {
+    // if (!hasDomMessages && !hasChatMessages && chatHistory.length === 0 && !hasGreeting) {
+    // 실리태번 방식: chatManager.chat.length === 0 조건만 확인 (chatHistory는 빈 배열일 수 있음)
+    // 하지만 저장소에 메시지가 있으면 불러온 채팅이므로 그리팅 추가 안 함
+    let hasStoredMessages = false;
+    if (chatManager.currentChatId) {
+        try {
+            const storedChatData = await ChatStorage.load(chatManager.currentChatId);
+            if (storedChatData && storedChatData.messages && storedChatData.messages.length > 0) {
+                hasStoredMessages = true;
+            }
+        } catch (error) {
+            console.debug('[AutofillSender] 저장된 채팅 확인 중 오류 (무시):', error);
+        }
+    }
+    if (!hasChatMessages && !hasStoredMessages) {
         const firstMessage = character?.data?.first_mes || character?.first_mes || '';
         if (firstMessage && firstMessage.trim()) {
             // substituteParams - 전역 스코프에서 사용
