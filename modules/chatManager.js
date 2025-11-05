@@ -4001,14 +4001,63 @@ class ChatManager {
                     chatId = this.currentChatId;
                     // 기존 채팅 데이터 로드 (메타데이터 보존용)
                     existingChatData = await ChatStorage.load(chatId);
+                    
+                    // ⚠️ 중요: 불러온 채팅(isImported)인 경우 UUID 매칭 건너뛰기
+                    // 불러온 채팅은 항상 기존 채팅에 저장해야 하며, 새 채팅으로 저장되면 안 됨
+                    if (existingChatData && existingChatData.metadata?.isImported) {
+                        console.debug('[ChatManager.saveChat] 불러온 채팅 감지, UUID 매칭 건너뛰고 기존 채팅에 저장:', {
+                            chatId: chatId.substring(0, 50),
+                            messageCount: existingChatData.messages?.length || 0
+                        });
+                        // chatId가 이미 설정되어 있으므로 UUID 매칭 블록을 건너뛰도록 함
+                    }
                 }
             }
             
             // currentChatId가 null이거나 characterId와 같으면 새로 찾기
+            // ⚠️ 중요: 불러온 채팅인 경우 UUID 매칭 건너뛰기 (이미 위에서 chatId 설정됨)
             if (!chatId) {
-                // currentChatId가 null이지만 기존 채팅이 있을 수 있음 (regenerateMessage 후 등)
-                // 1. 먼저 this.chat의 UUID로 매칭 시도 (리롤 후 새 메시지 생성 완료 시 필요)
-                if (this.chat && this.chat.length > 0 && this.currentCharacterId) {
+                // ⚠️ 중요: 불러온 채팅인 경우 UUID 매칭 건너뛰기
+                // 불러온 채팅은 this.chat에 메시지가 있어도 새 채팅으로 저장되면 안 됨
+                if (this._isImportedChat) {
+                    console.debug('[ChatManager.saveChat] 불러온 채팅 감지, UUID 매칭 건너뛰기:', {
+                        isImportedChat: this._isImportedChat,
+                        chatArrayLength: this.chat?.length || 0
+                    });
+                    // chatId가 null이지만 불러온 채팅이므로 새 채팅 생성 안 함
+                    // currentChatId가 설정되어 있지 않으면 오류 상황
+                    if (!this.currentChatId) {
+                        console.warn('[ChatManager.saveChat] 불러온 채팅인데 currentChatId가 없음, 저장 건너뜀');
+                        this._isSavingChat = false;
+                        return;
+                    }
+                    // currentChatId가 있으면 그것을 사용
+                    chatId = this.currentChatId;
+                    existingChatData = await ChatStorage.load(chatId);
+                } else {
+                    // ⚠️ 중요: 새 채팅 생성 직후 판단
+                    // createNewChat() 직후에는:
+                    // 1. this.chat이 비어있거나 새로 생성된 그리팅 1개만 있어야 함
+                    // 2. 새로 생성된 메시지의 UUID는 기존 채팅에 없으므로 매칭되지 않음
+                    // 3. 하지만 만약 이전 채팅의 메시지가 DOM에 남아있다면 잘못 매칭될 수 있음
+                    // 따라서 새 채팅 생성 직후이고, this.chat이 0개 또는 1개(그리팅만)이고,
+                    // chatCreateDate가 최근(5초 이내)이면 새 채팅으로 판단하여 UUID 매칭 건너뛰기
+                    const isRecentlyCreatedChat = this._isNewChatCreated && 
+                        this.chatCreateDate && 
+                        (Date.now() - this.chatCreateDate) < 5000 && // 5초 이내
+                        this.chat.length <= 1; // 그리팅만 있거나 비어있음
+                    
+                    if (isRecentlyCreatedChat) {
+                        console.debug('[ChatManager.saveChat] 새 채팅 생성 직후로 판단, UUID 매칭 건너뛰기:', {
+                            isNewChatCreated: this._isNewChatCreated,
+                            chatCreateDate: this.chatCreateDate,
+                            timeSinceCreation: Date.now() - this.chatCreateDate,
+                            chatLength: this.chat.length
+                        });
+                    } else {
+                    // currentChatId가 null이지만 기존 채팅이 있을 수 있음 (regenerateMessage 후 등)
+                    // 1. 먼저 this.chat의 UUID로 매칭 시도 (리롤 후 새 메시지 생성 완료 시 필요)
+                    if (this.chat && this.chat.length > 0 && this.currentCharacterId) {
                     try {
                         const allChats = await ChatStorage.loadAll();
                         const chatMessageUuids = this.chat.map(msg => msg.uuid).filter(uuid => uuid);
@@ -4023,6 +4072,12 @@ class ChatManager {
                                 if (candidateChatData && candidateChatData.characterId === this.currentCharacterId) {
                                     // chatId가 characterId와 같으면 잘못된 매칭 (characterId는 채팅 ID가 아님)
                                     if (candidateChatId === this.currentCharacterId || !candidateChatId.includes('_')) {
+                                        continue;
+                                    }
+                                    
+                                    // ⚠️ 중요: 불러온 채팅(isImported)은 UUID 매칭에서 제외
+                                    // 불러온 채팅의 UUID가 새 채팅 생성 시 잘못 매칭되는 것을 방지
+                                    if (candidateChatData.metadata?.isImported) {
                                         continue;
                                     }
                                     
@@ -4062,9 +4117,17 @@ class ChatManager {
                         console.warn('[ChatManager.saveChat] 기존 채팅 찾기 실패 (this.chat 경로 - 시작 부분):', error);
                     }
                 }
+                    }
+                }
                 
                 // 2. this.chat 매칭 실패 시 DOM 메시지 UUID로 매칭 시도 (fallback)
-                if (!chatId) {
+                // ⚠️ 중요: 새 채팅 생성 직후에는 UUID 매칭 건너뛰기
+                const isRecentlyCreatedChatForDOM = this._isNewChatCreated && 
+                    this.chatCreateDate && 
+                    (Date.now() - this.chatCreateDate) < 5000 && // 5초 이내
+                    this.chat.length <= 1; // 그리팅만 있거나 비어있음
+                
+                if (!chatId && !isRecentlyCreatedChatForDOM) {
                     const messageWrappersForCheck = Array.from(this.elements.chatMessages.querySelectorAll('.message-wrapper'));
                     if (messageWrappersForCheck.length > 0 && this.currentCharacterId) {
                         try {
@@ -4083,6 +4146,12 @@ class ChatManager {
                                     if (candidateChatData && candidateChatData.characterId === this.currentCharacterId) {
                                         // chatId가 characterId와 같으면 잘못된 매칭 (characterId는 채팅 ID가 아님)
                                         if (candidateChatId === this.currentCharacterId || !candidateChatId.includes('_')) {
+                                            continue;
+                                        }
+                                        
+                                        // ⚠️ 중요: 불러온 채팅(isImported)은 UUID 매칭에서 제외
+                                        // 불러온 채팅의 UUID가 새 채팅 생성 시 잘못 매칭되는 것을 방지
+                                        if (candidateChatData.metadata?.isImported) {
                                             continue;
                                         }
                                         
@@ -4198,6 +4267,12 @@ class ChatManager {
                             
                             for (const [candidateChatId, candidateChatData] of Object.entries(allChats)) {
                                 if (candidateChatData && candidateChatData.characterId === this.currentCharacterId) {
+                                    // ⚠️ 중요: 불러온 채팅(isImported)은 UUID 매칭에서 제외
+                                    // 불러온 채팅의 UUID가 새 채팅 생성 시 잘못 매칭되는 것을 방지
+                                    if (candidateChatData.metadata?.isImported) {
+                                        continue;
+                                    }
+                                    
                                     const candidateMessages = candidateChatData.messages || [];
                                     const candidateUuids = candidateMessages.map(msg => msg.uuid).filter(uuid => uuid);
                                     // this.chat의 UUID 중 매칭되는 개수 계산
@@ -4631,6 +4706,12 @@ class ChatManager {
                                 if (candidateChatData && candidateChatData.characterId === this.currentCharacterId) {
                                     // chatId가 characterId와 같으면 잘못된 매칭 (characterId는 채팅 ID가 아님)
                                     if (candidateChatId === this.currentCharacterId || !candidateChatId.includes('_')) {
+                                        continue;
+                                    }
+                                    
+                                    // ⚠️ 중요: 불러온 채팅(isImported)은 UUID 매칭에서 제외
+                                    // 불러온 채팅의 UUID가 새 채팅 생성 시 잘못 매칭되는 것을 방지
+                                    if (candidateChatData.metadata?.isImported) {
                                         continue;
                                     }
                                     
@@ -5244,6 +5325,12 @@ class ChatManager {
             // 저장 완료 플래그 해제
             this._isSavingChat = false;
             
+            // ⚠️ 중요: 새 채팅 생성 플래그 해제 (저장 완료 후)
+            if (this._isNewChatCreated) {
+                this._isNewChatCreated = false;
+                console.debug('[ChatManager.saveChat] 새 채팅 생성 플래그 해제');
+            }
+            
             // 채팅 목록 패널이 열려있으면 자동 새로고침 (메시지가 1개 이상일 때만)
             // 비동기로 처리하여 저장 성능에 영향 없도록
             if (messageCount > 0 && window.panelManager) {
@@ -5344,6 +5431,17 @@ class ChatManager {
         // 대안: addMessage에 characterId 매개변수 추가 (더 큰 수정 필요)
         this.currentCharacterId = chatData.characterId;
         this.chatCreateDate = chatData.metadata.create_date || Date.now();
+        
+        // ⚠️ 중요: 불러온 채팅인 경우 플래그 설정 (saveChat에서 UUID 매칭 건너뛰기용)
+        if (chatData.metadata?.isImported) {
+            this._isImportedChat = true;
+            console.debug('[ChatManager.loadChat] 불러온 채팅 감지, 플래그 설정:', {
+                chatId: chatId.substring(0, 50),
+                messageCount: chatData.messages?.length || 0
+            });
+        } else {
+            this._isImportedChat = false;
+        }
 
             // 실리태번과 동일: 전체 메시지를 chat 배열에 저장 (인덱스 0부터 시작)
             // 메시지 순서는 저장 시 이미 확정됨 (불러오기 시 파일 순서 유지)
@@ -5753,7 +5851,12 @@ class ChatManager {
         }
 
         // 규칙 5: 메시지가 0개인 채팅을 새로고침하거나 다른 곳에서 돌아오면 그리팅 추가
-        if (isEmptyChat && messages.length === 0) {
+        // ⚠️ 중요: 불러온 채팅(isImported)은 절대 그리팅 추가 안 함
+        // ⚠️ 중요: 저장소의 실제 메시지 개수도 확인 (existingMessageCount가 0일 때만 그리팅 추가)
+        // isEmptyChat이 true여도 저장소에 메시지가 있으면 그리팅 추가 안 함
+        const isImportedChat = chatData.metadata?.isImported === true;
+        const storedMessageCount = chatData.messages ? chatData.messages.length : 0;
+        if (!isImportedChat && isEmptyChat && messages.length === 0 && storedMessageCount === 0) {
             // 캐릭터 정보 다시 가져오기 (최신 상태)
             // ⚠️ 중요: chatData.characterId를 사용 (this.currentCharacterId는 설정하지 않으므로 사용하지 않음)
             const latestCharacter = await CharacterStorage.load(chatCharacterId);
@@ -5900,6 +6003,9 @@ class ChatManager {
         // 실리태번과 동일: 새 채팅 생성 시 chat 배열 초기화
         this.chat = [];
         this.chat_metadata = {};
+        
+        // ⚠️ 중요: 새 채팅 생성 플래그 설정 (saveChat에서 UUID 매칭 건너뛰기용)
+        this._isNewChatCreated = true;
 
         // 캐릭터에 현재 채팅 정보 저장
         character.chat = chatName;
@@ -6643,9 +6749,37 @@ class ChatManager {
         let checkCount = 0;
         const maxChecks = 10; // 1초간만 (100ms 간격)
         let isCleanedUp = false;
+        let lastScrollTop = messages.scrollTop;
+        let scrollLock = false; // 사용자가 스크롤을 올렸는지 감지
+        
+        // 스크롤 이벤트 리스너: 사용자가 스크롤을 올렸는지 감지
+        const scrollHandler = () => {
+            if (isCleanedUp) return;
+            
+            const currentScrollTop = messages.scrollTop;
+            const scrollHeight = messages.scrollHeight;
+            const clientHeight = messages.clientHeight;
+            const maxScrollTop = scrollHeight - clientHeight;
+            const distanceFromBottom = maxScrollTop - currentScrollTop;
+            
+            // 사용자가 스크롤을 위로 올렸는지 확인 (이전 스크롤 위치보다 위로)
+            if (currentScrollTop < lastScrollTop - 5) {
+                // 사용자가 스크롤을 올렸으면 자동 스크롤 중단
+                scrollLock = true;
+            }
+            
+            // 사용자가 최하단으로 스크롤하면 자동 스크롤 재개
+            if (distanceFromBottom <= 5) {
+                scrollLock = false;
+            }
+            
+            lastScrollTop = currentScrollTop;
+        };
+        
+        messages.addEventListener('scroll', scrollHandler, { passive: true });
         
         const performScroll = () => {
-            if (!messages || isCleanedUp) return;
+            if (!messages || isCleanedUp || scrollLock) return;
             
             const scrollHeight = messages.scrollHeight;
             const clientHeight = messages.clientHeight;
@@ -6659,6 +6793,7 @@ class ChatManager {
                 // 최하단이 아니면 스크롤 (1px 이상 차이나면)
                 if (distanceFromBottom > 1) {
                     messages.scrollTop = scrollHeight;
+                    lastScrollTop = messages.scrollTop;
                 }
             }
         };
@@ -6715,6 +6850,7 @@ class ChatManager {
             if (resizeTimeout) clearTimeout(resizeTimeout);
             if (checkInterval) clearInterval(checkInterval);
             resizeObserver.disconnect();
+            messages.removeEventListener('scroll', scrollHandler);
         };
         
         // 1.5초 후 자동 정리 (안전장치)

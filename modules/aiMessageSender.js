@@ -264,15 +264,10 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
         const messageDeletedRecently = chatManager._messageDeletedRecently || false;
         
         // IndexedDB에 저장된 메시지가 있는지 확인 (채팅이 이미 시작된 경우)
-        // currentChatId가 있고 IndexedDB에 메시지가 저장되어 있으면 그리팅을 추가하지 않음
-        // 중요: 메시지 삭제 후 saveChat이 메시지를 0개로 저장했으면,
-        // IndexedDB에도 메시지가 0개로 저장되어 있어야 함
-        // 하지만 saveChat 직후 IndexedDB 쓰기가 완전히 반영되지 않았을 수 있으므로,
-        // messageDeletedRecently 플래그도 함께 확인
+        // ⚠️ 중요: currentChatId가 있으면 항상 IndexedDB 확인 (messageDeletedRecently와 무관)
+        // messageDeletedRecently가 true여도 저장소에 메시지가 있으면 그리팅 추가 안 함
         let hasStoredMessages = false;
-        if (chatManager.currentChatId && !messageDeletedRecently) {
-            // 메시지가 최근에 삭제되지 않았을 때만 IndexedDB 확인
-            // (삭제 후에는 IndexedDB 확인이 불필요함 - 플래그로 충분)
+        if (chatManager.currentChatId) {
             try {
                 // ChatStorage - 전역 스코프에서 사용
                 const storedChatData = await ChatStorage.load(chatManager.currentChatId);
