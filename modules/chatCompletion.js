@@ -136,39 +136,15 @@ class ChatCompletion {
         this.validateMessageCollection(collection);
         this.checkTokenBudget(collection, collection.identifier);
 
+        // 실리태번과 완전히 동일: 간단한 할당 (희소 배열 허용)
         if (null !== position && -1 !== position) {
-            // position이 유효한지 확인
-            if (position < 0) {
-                // 경고 코드 토스트 알림 표시
-                if (typeof showErrorCodeToast === 'function') {
-                    showErrorCodeToast('WARN_AI_20007', `잘못된 position 값: ${position}`);
-                }
-                this.messages.collection.push(collection);
-            } else if (position >= this.messages.collection.length) {
-                // position이 배열 길이보다 크거나 같으면, 배열 끝에 추가
-                // 디버깅: position이 배열 길이보다 큼
-                console.debug('[ChatCompletion] position이 배열 길이보다 큼:', position, '>=', this.messages.collection.length);
-                this.messages.collection.push(collection);
-            } else {
-                // 중요: position에 이미 다른 컬렉션이 있으면 경고하고 처리
-                const existing = this.messages.collection[position];
-                if (existing) {
-                    if (existing.identifier === collection.identifier) {
-                        // 같은 identifier면 덮어쓰기 (업데이트)
-                        this.messages.collection[position] = collection;
-                    } else {
-                        // 다른 identifier면 삽입 (기존 항목은 그대로 유지하고 뒤로 밀기)
-                        // 디버깅: position이 이미 사용 중
-                        console.debug('[ChatCompletion] position', position, '이 이미', existing.identifier, '로 사용 중,', collection.identifier, '삽입');
-                        this.messages.collection.splice(position, 0, collection);
-                    }
-                } else {
-                    // position이 비어있으면 정확한 위치에 설정
-                    this.messages.collection[position] = collection;
-                }
+            // 디버깅: 같은 position에 이미 다른 컬렉션이 있는지 확인
+            const existing = this.messages.collection[position];
+            if (existing && existing.identifier !== collection.identifier) {
+                console.warn(`[ChatCompletion.add] position ${position}에 이미 ${existing.identifier}가 있음. ${collection.identifier}로 덮어쓰기됨.`);
             }
+            this.messages.collection[position] = collection;
         } else {
-            // position이 지정되지 않았으면 배열 끝에 추가
             this.messages.collection.push(collection);
         }
 
@@ -304,7 +280,15 @@ class ChatCompletion {
     getChat() {
         const chat = [];
         
-        for (let item of this.messages.collection) {
+        // 실리태번과 동일: for...of로 순회하면 희소 배열의 빈 슬롯은 자동으로 건너뛰어짐
+        // 하지만 희소 배열에서 for...of는 실제로 존재하는 인덱스만 순회하므로 문제없음
+        // 다만 명시적으로 인덱스 순서대로 순회하여 순서 보장
+        const maxIndex = this.messages.collection.length > 0 
+            ? Math.max(...Object.keys(this.messages.collection).map(Number))
+            : -1;
+        
+        for (let i = 0; i <= maxIndex; i++) {
+            const item = this.messages.collection[i];
             if (!item) {
                 continue;
             }

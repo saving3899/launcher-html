@@ -165,7 +165,29 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
     // PromptManager - 전역 스코프에서 사용
     const promptManager = new PromptManager();
     
+    // 페르소나 이름 가져오기 ({{user}} 치환용)
+    let userName = 'User';
+    const currentPersonaId = settings.currentPersonaId;
+    if (currentPersonaId) {
+        // UserPersonaStorage - 전역 스코프에서 사용
+        const persona = await UserPersonaStorage.load(currentPersonaId);
+        if (persona && persona.name) {
+            userName = persona.name;
+        }
+    }
+    
+    // 캐릭터 이름 가져오기 ({{char}} 치환용)
+    let characterNameForPrompt = 'Character';
+    if (currentCharId) {
+        // CharacterStorage - 전역 스코프에서 사용
+        const character = await CharacterStorage.load(currentCharId);
+        if (character && character.name) {
+            characterNameForPrompt = character.name;
+        }
+    }
+    
     // PromptManager 초기화 (실리태번 방식)
+    // 실리태번과 동일: name1, name2를 moduleConfiguration에 포함하여 preparePrompt에서 사용
     const moduleConfiguration = {
         containerIdentifier: 'completion_prompt_manager',
         prefix: 'completion_',
@@ -174,6 +196,8 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
             strategy: 'global',
             dummyId: 100001,
         },
+        name1: userName,
+        name2: characterNameForPrompt,
     };
     
     // 서비스 설정 준비 (실리태번과 동일하게 빈 배열로 초기화)
@@ -294,23 +318,38 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
             }
         }
         
+        // ⚠️ 중요: DOM을 직접 확인 (가장 확실한 방법)
+        // DOM에 실제 메시지 요소가 있으면 이미 채팅이 진행 중이므로 그리팅을 추가하지 않음
+        const domMessageWrappers = chatManager.elements?.chatMessages?.querySelectorAll('.message-wrapper') || [];
+        const hasDomMessages = domMessageWrappers.length > 0;
+        
+        // ⚠️ 중요: chatManager.chat 배열 확인 (두 번째로 신뢰할 수 있는 소스)
+        // chatManager.chat 배열이 비어있지 않으면 이미 채팅이 진행 중이므로 그리팅을 추가하지 않음
+        const hasChatMessages = chatManager.chat && chatManager.chat.length > 0;
+        
         // 그리팅이 있는지 확인 (DOM, this.chat, IndexedDB 모두 확인)
         const hasGreeting = hasGreetingInDOM || hasGreetingInChat || hasGreetingInStorage;
         
-        // 그리팅 추가 조건:
-        // 1. DOM, this.chat, IndexedDB 모두에 그리팅이 없고
-        // 2. 메시지가 최근에 삭제되지 않았고
-        // 3. IndexedDB에 저장된 메시지가 없을 때 (완전히 새로운 채팅일 때만)
-        // 4. 메시지가 0개일 때만 그리팅 추가 (메시지가 1개 이상이면 이미 채팅이 진행 중이므로 그리팅 추가 안 함)
-        const shouldAddGreeting = !hasGreeting && !messageDeletedRecently && !hasStoredMessages && chatHistory.length === 0;
+        // 그리팅 추가 조건 (모든 조건을 만족해야 함):
+        // 1. DOM에 메시지 요소가 0개일 때만 (가장 중요 - 실제 DOM 상태 확인)
+        // 2. chatManager.chat 배열에 메시지가 0개일 때만 (두 번째로 중요)
+        // 3. chatHistory 배열이 0개일 때 (getChatHistory() 결과)
+        // 4. DOM, this.chat, IndexedDB 모두에 그리팅이 없고
+        // 5. 메시지가 최근에 삭제되지 않았고
+        // 6. IndexedDB에 저장된 메시지가 없을 때 (완전히 새로운 채팅일 때만)
+        // ⚠️ 중요: hasDomMessages 또는 hasChatMessages가 true이면 절대 그리팅 추가 안 함
+        const shouldAddGreeting = !hasDomMessages && !hasChatMessages && chatHistory.length === 0 && !hasGreeting && !messageDeletedRecently && !hasStoredMessages;
         
         console.debug('[AIMessageSender] 그리팅 체크:', {
+            hasDomMessages: hasDomMessages, // 가장 중요 - DOM 직접 확인
+            domMessageCount: domMessageWrappers.length,
+            hasChatMessages: hasChatMessages, // 두 번째로 중요
+            chatArrayLength: chatManager.chat?.length || 0,
+            chatHistoryLength: chatHistory.length,
             hasGreetingInDOM,
             hasGreetingInChat,
             hasGreetingInStorage,
             hasGreeting,
-            chatHistoryLength: chatHistory.length,
-            chatArrayLength: chatManager.chat?.length || 0,
             messageDeletedRecently,
             hasStoredMessages,
             currentChatId: chatManager.currentChatId,
@@ -334,6 +373,12 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
                 console.debug('[AIMessageSender] 그리팅 추가 스킵: 메시지가 최근에 삭제됨');
             } else if (hasStoredMessages) {
                 console.debug('[AIMessageSender] 그리팅 추가 스킵: IndexedDB에 저장된 메시지가 있음 (채팅이 이미 시작됨)');
+            } else if (hasDomMessages) {
+                console.debug('[AIMessageSender] 그리팅 추가 스킵: DOM에 메시지 요소가 있음 (채팅이 이미 진행 중)');
+            } else if (hasChatMessages) {
+                console.debug('[AIMessageSender] 그리팅 추가 스킵: chatManager.chat에 메시지가 있음 (채팅이 이미 진행 중)');
+            } else if (chatHistory.length > 0) {
+                console.debug('[AIMessageSender] 그리팅 추가 스킵: chatHistory 배열에 메시지가 있음');
             }
         }
     }
@@ -419,12 +464,13 @@ async function sendAIMessage(userMessage, chatManager, generateType = 'normal', 
         }
         
         // prepareOpenAIMessagesFromCharacter - 전역 스코프에서 사용
+        // 실리태번과 동일: name1은 페르소나 이름, name2는 캐릭터 이름
         const [messagesResult, success] = await prepareOpenAIMessagesFromCharacter(
             {
                 character,
                 chatMetadata: {},
-                name1: 'User',
-                name2: characterName, // 검증된 캐릭터 이름 사용
+                name1: userName, // 페르소나 이름 사용 (위에서 가져온 값)
+                name2: characterNameForPrompt, // 캐릭터 이름 사용 (위에서 가져온 값)
                 additionalOptions: {
                     messages: chatHistory,
                     type: generateType === 'continue' ? 'continue' : 'normal',

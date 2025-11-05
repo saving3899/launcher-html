@@ -5690,11 +5690,19 @@ class ChatManager {
             // HTML 렌더링 제한 적용
             await applyHtmlRenderLimit();
 
-        // 스크롤을 맨 아래로 (약간의 지연을 주어 DOM 렌더링 완료 후 스크롤)
+        // 스크롤을 맨 아래로 (비동기로 실행하여 블로킹 방지)
+        // 여러 프레임 대기 후 스크롤 (DOM 렌더링 완료 대기)
         requestAnimationFrame(() => {
-            setTimeout(() => {
-                this.scrollToBottom();
-            }, 100);
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    this.scrollToBottom(true);
+                    // 추가로 몇 번 더 시도 (이미지 로딩 등 대기)
+                    setTimeout(() => this.scrollToBottom(true), 300);
+                    setTimeout(() => this.scrollToBottom(true), 600);
+                    // 이미지 로딩 완료 후에도 확인
+                    this.ensureScrollToBottomBackground();
+                }, 100);
+            });
         });
         
         // 인풋창 높이 리셋 (채팅 로드 후 인풋창이 비어있을 수 있으므로)
@@ -6508,14 +6516,211 @@ class ChatManager {
 
     /**
      * 스크롤을 맨 아래로
+     * @param {boolean} force - 강제 스크롤 (즉시 실행, 추가 확인 없음)
      */
-    scrollToBottom() {
+    scrollToBottom(force = false) {
         // chat-messages가 실제 스크롤 컨테이너 (CSS에서 overflow-y: auto 설정됨)
         const messages = document.getElementById('chat-messages');
-        if (messages) {
+        if (!messages) return;
+        
+        const scrollHeight = messages.scrollHeight;
+        const clientHeight = messages.clientHeight;
+        
+        // 스크롤이 가능한 경우에만 스크롤
+        if (scrollHeight > clientHeight) {
             // 즉시 스크롤
-            messages.scrollTop = messages.scrollHeight;
+            messages.scrollTop = scrollHeight;
+            
+            // 강제 모드가 아니면 추가 확인
+            if (!force) {
+                // DOM 업데이트 후 다시 확인하여 정확히 최하단에 위치하도록
+                requestAnimationFrame(() => {
+                    const newScrollHeight = messages.scrollHeight;
+                    const newClientHeight = messages.clientHeight;
+                    if (newScrollHeight > newClientHeight) {
+                        const currentScrollTop = messages.scrollTop;
+                        const maxScrollTop = newScrollHeight - newClientHeight;
+                        const distanceFromBottom = maxScrollTop - currentScrollTop;
+                        
+                        // 10px 이상 차이나면 다시 스크롤
+                        if (distanceFromBottom > 10) {
+                            messages.scrollTop = newScrollHeight;
+                        }
+                    }
+                });
+            }
         }
+    }
+    
+    /**
+     * 스크롤을 최하단으로 안정적으로 이동 (여러 번 시도)
+     * @param {number} maxAttempts - 최대 시도 횟수
+     * @param {number} delay - 각 시도 간 지연 시간 (ms)
+     */
+    async scrollToBottomSmooth(maxAttempts = 5, delay = 100) {
+        const messages = document.getElementById('chat-messages');
+        if (!messages) return;
+        
+        let lastScrollHeight = 0;
+        let stableCount = 0;
+        const requiredStableCount = 2; // scrollHeight가 2번 연속 같아야 안정화된 것으로 간주
+        
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            // 현재 스크롤 높이 확인
+            const currentScrollHeight = messages.scrollHeight;
+            const scrollTop = messages.scrollTop;
+            const clientHeight = messages.clientHeight;
+            const maxScrollTop = currentScrollHeight - clientHeight;
+            
+            // 스크롤 높이가 안정화되었는지 확인
+            if (currentScrollHeight === lastScrollHeight) {
+                stableCount++;
+                if (stableCount >= requiredStableCount) {
+                    // 안정화되었고 최하단에 도달했는지 확인
+                    const distanceFromBottom = maxScrollTop - scrollTop;
+                    if (distanceFromBottom <= 10) {
+                        // 이미 최하단에 있으면 종료
+                        break;
+                    }
+                }
+            } else {
+                stableCount = 0;
+            }
+            
+            lastScrollHeight = currentScrollHeight;
+            
+            // 스크롤 실행
+            messages.scrollTop = currentScrollHeight;
+            
+            // 다음 시도 전 대기 (마지막 시도가 아니면)
+            if (attempt < maxAttempts - 1) {
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+        
+        // 이미지 로딩 완료 후에도 한 번 더 확인 (이미지로 인해 높이가 변경될 수 있음)
+        const images = messages.querySelectorAll('img');
+        if (images.length > 0) {
+            // 이미지 로딩 완료 대기 (최대 2초)
+            const imageLoadPromises = Array.from(images).map(img => {
+                if (img.complete) return Promise.resolve();
+                return new Promise(resolve => {
+                    const timeout = setTimeout(resolve, 2000);
+                    img.addEventListener('load', () => {
+                        clearTimeout(timeout);
+                        resolve();
+                    }, { once: true });
+                    img.addEventListener('error', () => {
+                        clearTimeout(timeout);
+                        resolve();
+                    }, { once: true });
+                });
+            });
+            
+            await Promise.all(imageLoadPromises);
+            
+            // 이미지 로딩 후 스크롤 높이가 변경되었을 수 있으므로 다시 스크롤
+            const finalScrollHeight = messages.scrollHeight;
+            const finalScrollTop = messages.scrollTop;
+            const finalClientHeight = messages.clientHeight;
+            const finalMaxScrollTop = finalScrollHeight - finalClientHeight;
+            const finalDistanceFromBottom = finalMaxScrollTop - finalScrollTop;
+            
+            if (finalDistanceFromBottom > 10) {
+                messages.scrollTop = finalScrollHeight;
+            }
+        }
+    }
+    
+    /**
+     * 채팅 진입 시 최하단으로 스크롤을 확실히 고정 (백그라운드에서 비동기 실행)
+     * 블로킹하지 않고 백그라운드에서 실행하여 성능 저하 방지
+     */
+    ensureScrollToBottomBackground() {
+        const messages = document.getElementById('chat-messages');
+        if (!messages) return;
+        
+        let checkCount = 0;
+        const maxChecks = 10; // 1초간만 (100ms 간격)
+        let isCleanedUp = false;
+        
+        const performScroll = () => {
+            if (!messages || isCleanedUp) return;
+            
+            const scrollHeight = messages.scrollHeight;
+            const clientHeight = messages.clientHeight;
+            
+            // 스크롤이 가능한 경우에만 스크롤
+            if (scrollHeight > clientHeight) {
+                const scrollTop = messages.scrollTop;
+                const maxScrollTop = scrollHeight - clientHeight;
+                const distanceFromBottom = maxScrollTop - scrollTop;
+                
+                // 최하단이 아니면 스크롤 (1px 이상 차이나면)
+                if (distanceFromBottom > 1) {
+                    messages.scrollTop = scrollHeight;
+                }
+            }
+        };
+        
+        // ResizeObserver: 높이 변경 감지 (간단한 디바운싱)
+        let resizeTimeout = null;
+        const resizeObserver = new ResizeObserver(() => {
+            if (isCleanedUp) return;
+            if (resizeTimeout) clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                performScroll();
+            }, 50);
+        });
+        resizeObserver.observe(messages);
+        
+        // 이미지 로딩 감지
+        const images = messages.querySelectorAll('img');
+        images.forEach(img => {
+            if (img.complete) return;
+            img.addEventListener('load', () => {
+                if (!isCleanedUp) {
+                    setTimeout(() => performScroll(), 100);
+                }
+            }, { once: true });
+            img.addEventListener('error', () => {
+                if (!isCleanedUp) {
+                    setTimeout(() => performScroll(), 100);
+                }
+            }, { once: true });
+        });
+        
+        // 정기적으로 스크롤 확인 (1초간만)
+        const checkInterval = setInterval(() => {
+            if (isCleanedUp) {
+                clearInterval(checkInterval);
+                return;
+            }
+            
+            checkCount++;
+            performScroll();
+            
+            // 1초 후 정리
+            if (checkCount >= maxChecks) {
+                clearInterval(checkInterval);
+                cleanup();
+            }
+        }, 100);
+        
+        // 정리 함수
+        const cleanup = () => {
+            if (isCleanedUp) return;
+            isCleanedUp = true;
+            
+            if (resizeTimeout) clearTimeout(resizeTimeout);
+            if (checkInterval) clearInterval(checkInterval);
+            resizeObserver.disconnect();
+        };
+        
+        // 1.5초 후 자동 정리 (안전장치)
+        setTimeout(() => {
+            cleanup();
+        }, 1500);
     }
 
     /**

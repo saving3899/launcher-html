@@ -141,9 +141,25 @@ async function sendAIMessageForAutofill(userMessage, chatManager) {
     
 
     // 그리팅(첫 메시지)이 DOM에 없으면 추가
-    // 단, 메시지가 0개일 때만 그리팅 추가 (메시지가 1개 이상이면 이미 채팅이 진행 중이므로 그리팅 추가 안 함)
+    // ⚠️ 중요: DOM을 직접 확인 (가장 확실한 방법)
+    // DOM에 실제 메시지 요소가 있으면 이미 채팅이 진행 중이므로 그리팅을 추가하지 않음
+    const domMessageWrappers = chatManager.elements?.chatMessages?.querySelectorAll('.message-wrapper') || [];
+    const hasDomMessages = domMessageWrappers.length > 0;
+    
+    // ⚠️ 중요: chatManager.chat 배열 확인 (두 번째로 신뢰할 수 있는 소스)
+    // chatManager.chat 배열에 메시지가 있으면 이미 채팅이 진행 중이므로 그리팅을 추가하지 않음
+    const hasChatMessages = chatManager.chat && chatManager.chat.length > 0;
+    
+    // 그리팅이 있는지 확인
     const hasGreeting = chatHistory.some(m => m.role === 'assistant' && m.content && m.content.trim());
-    if (!hasGreeting && chatHistory.length === 0) {
+    
+    // 그리팅 추가 조건 (모든 조건을 만족해야 함):
+    // 1. DOM에 메시지 요소가 0개일 때만 (가장 중요 - 실제 DOM 상태 확인)
+    // 2. chatManager.chat 배열에 메시지가 0개일 때만 (두 번째로 중요)
+    // 3. chatHistory 배열이 0개일 때
+    // 4. 그리팅이 없을 때
+    // ⚠️ 중요: hasDomMessages 또는 hasChatMessages가 true이면 절대 그리팅 추가 안 함
+    if (!hasDomMessages && !hasChatMessages && chatHistory.length === 0 && !hasGreeting) {
         const firstMessage = character?.data?.first_mes || character?.first_mes || '';
         if (firstMessage && firstMessage.trim()) {
             // substituteParams - 전역 스코프에서 사용

@@ -519,7 +519,7 @@ class MobileChatApp {
     /**
      * 홈화면/채팅 영역 표시 상태 업데이트
      */
-    updateHomeScreenVisibility() {
+    async updateHomeScreenVisibility() {
         const homeScreen = document.getElementById('home-screen');
         const chatContainer = document.getElementById('chat-container');
         const panelContainer = document.getElementById('panel-container');
@@ -544,6 +544,10 @@ class MobileChatApp {
             // 홈화면 상태: 홈화면 표시, 채팅 영역 및 패널 숨김
             if (homeScreen) {
                 homeScreen.classList.remove('hidden');
+                // 최근 채팅 목록 렌더링 (renderRecentChatsToHomeScreen - 전역 스코프에서 사용)
+                if (typeof renderRecentChatsToHomeScreen === 'function') {
+                    await renderRecentChatsToHomeScreen();
+                }
             }
             if (chatContainer) {
                 chatContainer.classList.add('hidden');

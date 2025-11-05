@@ -1080,6 +1080,293 @@ async function createOtherSettingsPanel() {
 }
 
 /**
+ * 홈화면에 최근 채팅 목록 렌더링
+ * @returns {Promise<void>}
+ */
+async function renderRecentChatsToHomeScreen() {
+    const homeScreen = document.getElementById('home-screen');
+    if (!homeScreen) {
+        return;
+    }
+    
+    try {
+        // 모든 채팅 가져오기
+        const allChats = await ChatStorage.loadAll();
+        
+        // 날짜를 숫자로 변환하는 헬퍼 함수
+        const parseDate = (dateValue) => {
+            if (!dateValue) return 0;
+            if (typeof dateValue === 'number') return dateValue;
+            if (typeof dateValue === 'string') {
+                // 문자열 날짜를 숫자로 변환
+                const parsed = new Date(dateValue).getTime();
+                return isNaN(parsed) ? 0 : parsed;
+            }
+            return 0;
+        };
+        
+        // 삭제된 채팅 제외 및 정렬
+        const validChats = Object.entries(allChats)
+            .filter(([id, chat]) => {
+                // null 체크
+                if (!chat || chat === null) {
+                    return false;
+                }
+                
+                // 그리팅만 있는 채팅 제외 (그리팅 외에 실제 메시지가 1개 이상 있어야 함)
+                const messages = chat?.messages || chat?.chat || [];
+                const messageCount = messages.length;
+                
+                // 메시지가 0개면 제외
+                if (messageCount === 0) {
+                    return false;
+                }
+                
+                // 메시지가 1개이고 그것이 그리팅이면 제외
+                if (messageCount === 1) {
+                    const firstMessage = messages[0];
+                    // 첫 번째 메시지가 AI 메시지(그리팅)이고, 사용자 메시지가 없으면 제외
+                    if (firstMessage && !firstMessage.is_user && firstMessage.mes && firstMessage.mes.trim()) {
+                        return false; // 그리팅만 있는 채팅
+                    }
+                }
+                
+                // 메시지가 2개 이상이면 실제 대화가 있는 것으로 간주
+                // 또는 메시지 중에 사용자 메시지가 있는지 확인
+                const hasUserMessage = messages.some(msg => msg && msg.is_user === true);
+                if (!hasUserMessage && messageCount === 1) {
+                    // 사용자 메시지가 없고 메시지가 1개면 그리팅만 있는 채팅
+                    return false;
+                }
+                
+                return true;
+            })
+            .map(([id, chat]) => {
+                // lastMessageDate 계산
+                let lastMessageDate = parseDate(chat?.lastMessageDate);
+                
+                if (lastMessageDate === 0 && chat?.messages && chat.messages.length > 0) {
+                    // send_date 기준으로 정렬하여 마지막 메시지 찾기
+                    const sortedMessages = [...chat.messages].sort((a, b) => {
+                        const dateA = parseDate(a.send_date);
+                        const dateB = parseDate(b.send_date);
+                        return dateA - dateB;
+                    });
+                    const lastMessage = sortedMessages[sortedMessages.length - 1];
+                    lastMessageDate = parseDate(lastMessage?.send_date);
+                }
+                
+                if (lastMessageDate === 0) {
+                    // 메시지가 없으면 create_date 사용
+                    lastMessageDate = parseDate(chat?.metadata?.create_date) || 
+                                     parseDate(chat?.metadata?.chat_metadata?.create_date) || 
+                                     parseDate(chat?.create_date) || 
+                                     0;
+                }
+                
+                // lastMessageDate가 여전히 0이면 현재 시간 사용 (최하위 우선순위)
+                if (lastMessageDate === 0) {
+                    lastMessageDate = Date.now();
+                }
+                
+                return { id, chat, lastMessageDate };
+            })
+            .sort((a, b) => {
+                // 최신순 정렬: lastMessageDate 기준
+                // 안전하게 숫자로 변환 (undefined/null 방지)
+                const dateA = Number(a?.lastMessageDate) || 0;
+                const dateB = Number(b?.lastMessageDate) || 0;
+                
+                if (dateB !== dateA) {
+                    return dateB - dateA;
+                }
+                // lastMessageDate가 같으면 chatId로 비교
+                return (b?.id || '').localeCompare(a?.id || '');
+            })
+            .slice(0, 10); // 최근 10개만 표시
+        
+        // 채팅 목록 HTML 생성
+        if (validChats.length === 0) {
+            homeScreen.innerHTML = `
+                <div class="home-screen-content">
+                    <div class="home-screen-empty">
+                        <i class="fa-solid fa-comment-dots"></i>
+                        <p>최근 채팅이 없습니다</p>
+                    </div>
+                </div>
+            `;
+            return;
+        }
+        
+        const chatListHtml = await Promise.all(validChats.map(async ({ id, chat, lastMessageDate }) => {
+            // 캐릭터 정보 가져오기
+            const characterId = chat?.characterId || id.split('_')[0];
+            let character = null;
+            let characterName = 'Unknown';
+            let avatarImage = '';
+            
+            try {
+                character = await CharacterStorage.load(characterId);
+                if (character) {
+                    const data = character?.data || character;
+                    characterName = data?.name || character?.name || characterId;
+                    avatarImage = character?.avatar_image || character?.avatarImage || data?.avatar_image || '';
+                }
+            } catch (error) {
+                // 캐릭터를 찾을 수 없으면 메타데이터에서 가져오기
+                characterName = chat?.metadata?.character_name || chat?.character_name || 'Unknown';
+            }
+            
+            // 아바타 이미지 처리
+            const hasAvatar = avatarImage && avatarImage.trim() !== '';
+            const avatarSrc = hasAvatar ? avatarImage : getDefaultAvatar(characterName);
+            const avatarDisplay = hasAvatar 
+                ? `<img class="recent-chat-avatar" src="${avatarSrc}" alt="${escapeHtml(characterName)}" onerror="this.outerHTML='<i class=\\'fa-solid fa-user recent-chat-avatar-icon\\'></i>'">`
+                : `<i class="fa-solid fa-user recent-chat-avatar-icon"></i>`;
+            
+            // 메시지 카운팅
+            const messageCount = chat?.messages?.length || chat?.chat?.length || 0;
+            
+            // 마지막 메시지 내용 가져오기
+            let lastMessageText = '새 채팅';
+            if (messageCount > 0 && chat?.messages && chat.messages.length > 0) {
+                const lastMessage = chat.messages[chat.messages.length - 1];
+                if (lastMessage?.mes) {
+                    lastMessageText = lastMessage.mes.substring(0, 50);
+                    if (lastMessage.mes.length > 50) {
+                        lastMessageText += '...';
+                    }
+                }
+            }
+            
+            // 날짜 포맷팅 (안전하게 처리)
+            let dateStr = '';
+            try {
+                // lastMessageDate가 숫자인지 확인하고 날짜 생성
+                const dateValue = Number(lastMessageDate) || Date.now();
+                const date = new Date(dateValue);
+                
+                if (!isNaN(date.getTime()) && dateValue > 0) {
+                    // toLocaleString을 사용하여 날짜와 시간 모두 표시
+                    dateStr = date.toLocaleString('ko-KR', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false
+                    });
+                } else {
+                    dateStr = '날짜 없음';
+                }
+            } catch (error) {
+                console.error('[renderRecentChatsToHomeScreen] 날짜 포맷팅 오류:', error, { lastMessageDate, chatId: id });
+                dateStr = '날짜 없음';
+            }
+            
+            // 채팅 제목
+            const chatTitle = chat?.chatName || chat?.metadata?.chat_name || id;
+            
+            return `
+                <div class="recent-chat-item" data-chat-id="${id}" data-character-id="${characterId}">
+                    <div class="recent-chat-avatar-wrapper">
+                        ${avatarDisplay}
+                    </div>
+                    <div class="recent-chat-content">
+                        <div class="recent-chat-header">
+                            <div class="recent-chat-name">${escapeHtml(characterName)}</div>
+                            <div class="recent-chat-date">${escapeHtml(dateStr)}</div>
+                        </div>
+                        <div class="recent-chat-title">${escapeHtml(chatTitle)}</div>
+                        <div class="recent-chat-preview">${escapeHtml(lastMessageText)}</div>
+                        <div class="recent-chat-meta">${messageCount}개 메시지</div>
+                    </div>
+                </div>
+            `;
+        }));
+        
+        homeScreen.innerHTML = `
+            <div class="home-screen-content">
+                <div class="home-screen-header">
+                    <h2>최근 채팅</h2>
+                </div>
+                <div class="recent-chats-list">
+                    ${chatListHtml.join('')}
+                </div>
+            </div>
+        `;
+        
+        // 이벤트 리스너 추가
+        const chatItems = homeScreen.querySelectorAll('.recent-chat-item');
+        chatItems.forEach(item => {
+            item.addEventListener('click', async (e) => {
+                // 버튼 클릭이면 무시
+                if (e.target.closest('.recent-chat-item-actions')) {
+                    return;
+                }
+                
+                const chatId = item.dataset.chatId;
+                const characterId = item.dataset.characterId;
+                
+                if (!chatId || !characterId) {
+                    return;
+                }
+                
+                // 채팅 로드
+                if (window.app && window.app.chatManager && window.app.characterManager) {
+                    try {
+                        // 1. 캐릭터 저장 및 UI 기본 설정
+                        await CharacterStorage.saveCurrent(characterId);
+                        window.app.isCharacterSelected = true;
+                        
+                        // 2. 캐릭터 정보 업데이트 (characterManager.selectCharacter의 일부 기능만 수행)
+                        const character = await CharacterStorage.load(characterId);
+                        if (character && window.app.elements.charName) {
+                            const name = character?.data?.name || character?.name || characterId;
+                            window.app.elements.charName.textContent = name;
+                        }
+                        
+                        // 3. 특정 채팅 로드 (캐릭터 선택 후 특정 채팅 로드)
+                        await window.app.chatManager.loadChat(chatId);
+                        
+                        // 4. 입력창 표시
+                        const chatInputContainer = document.querySelector('.chat-input-container');
+                        if (chatInputContainer) {
+                            chatInputContainer.classList.add('visible');
+                        }
+                        
+                        // 5. 홈화면/채팅 영역 표시 상태 업데이트 (채팅 화면으로 전환)
+                        await window.app.updateHomeScreenVisibility();
+                        
+                    } catch (error) {
+                        // 오류 코드 토스트 알림 표시
+                        if (typeof showErrorCodeToast === 'function') {
+                            showErrorCodeToast('ERR_HOME_1001', '채팅 로드 중 오류가 발생했습니다', error);
+                        }
+                        console.error('[renderRecentChatsToHomeScreen] 채팅 로드 오류:', error);
+                    }
+                }
+            });
+        });
+        
+    } catch (error) {
+        // 오류 코드 토스트 알림 표시
+        if (typeof showErrorCodeToast === 'function') {
+            showErrorCodeToast('ERR_HOME_1002', '최근 채팅 목록 로드 중 오류가 발생했습니다', error);
+        }
+        
+        // 오류 시 빈 화면 표시
+        homeScreen.innerHTML = `
+            <div class="home-screen-content">
+                <div class="home-screen-empty">
+                    <i class="fa-solid fa-exclamation-triangle"></i>
+                    <p>채팅 목록을 불러올 수 없습니다</p>
+                </div>
+            </div>
+        `;
+    }
+}
+
+/**
  * HTML 이스케이프
  * @param {string} text - 이스케이프할 텍스트
  * @returns {string} 이스케이프된 텍스트

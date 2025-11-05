@@ -30,14 +30,19 @@ async function addToChatCompletion(prompts, chatCompletion, promptManager, token
     }
 
     const index = target ? prompts.index(target) : prompts.index(source);
+    
+    // 실리태번과 동일: 이미 같은 identifier가 해당 position에 추가되었는지 확인
+    // (ChatCompletion.add()에서 같은 identifier면 덮어쓰기를 하지만, 불필요한 중복 작업 방지)
+    const existing = chatCompletion.messages.collection[index];
+    if (existing) {
+        if (existing.identifier === source) {
+            // 이미 같은 identifier가 해당 position에 있으면 스킵 (실리태번과 동일)
+            return;
+        }
+    }
+    
     const collection = new MessageCollection(source);
     const message = await Message.fromPromptAsync(prompt, tokenCountFn);
-    
-    // 디버깅: user role 프롬프트 확인
-    if (message.role === 'user') {
-        // 디버깅: 프롬프트가 user role을 가짐
-        console.debug('[PopulateChatCompletion] 프롬프트가 user role을 가짐:', source);
-    }
     
     collection.add(message);
     chatCompletion.add(collection, index);
@@ -98,6 +103,9 @@ async function populateChatCompletion(
     await populateChatHistory(chatHistoryMessages, prompts, chatCompletion, type, cyclePrompt, promptManager, tokenCountFn, oaiSettings, excludeStatusBarChoice, namesBehavior, finalCharacterName);
     
     // 실리태번과 동일: Character and world information을 하드코딩된 순서로 먼저 추가 (1022-1029번 라인)
+    // 주의: addToChatCompletion 내부에서 prompts.index(source)를 사용하여 position을 결정함
+    // PromptCollection이 prompt_order 순서대로 구성되어 있다면 prompts.index()가 올바른 index를 반환함
+    
     await addToChatCompletionBound('worldInfoBefore');
     await addToChatCompletionBound('main');
     await addToChatCompletionBound('worldInfoAfter');
@@ -398,15 +406,6 @@ async function populateDialogueExamples(prompts, chatCompletion, messageExamples
 async function populateChatHistory(messages, prompts, chatCompletion, type = null, cyclePrompt = null, promptManager, tokenCountFn = null, oaiSettings = {}, excludeStatusBarChoice = false, namesBehavior = 0, characterName = null) {
     const messagesArray = Array.isArray(messages) ? messages : [];
     
-    // 디버깅: populateChatHistory에 전달되는 messages 확인
-    console.debug('[populateChatHistory] 전달받은 messages:', {
-        messagesCount: messagesArray.length,
-        messagesPreview: messagesArray.map(msg => ({
-            role: msg.role,
-            contentPreview: msg.content?.substring(0, 50) || 'no-content'
-        }))
-    });
-    
     // 실리태번과 동일 (786번 라인)
     // 중요: chatHistory 프롬프트가 없어도 채팅 메시지는 추가해야 함!
     // chatHistory 프롬프트는 마커 역할만 하므로, 없으면 자동으로 추가
@@ -448,6 +447,13 @@ async function populateChatHistory(messages, prompts, chatCompletion, type = nul
         : null;
     if (newChatMessage) {
         chatCompletion.reserveBudget(newChatMessage);
+        try {
+            chatCompletion.insertAtStart(newChatMessage, 'chatHistory');
+        } catch (error) {
+            if (typeof showErrorCodeToast === 'function') {
+                showErrorCodeToast('WARN_AI_20008', `chatHistory 컬렉션을 찾을 수 없음 (newChatMessage): ${error.message}`);
+            }
+        }
     }
 
     // 상태창/선택지 atDepth 엔트리 수집
@@ -462,11 +468,12 @@ async function populateChatHistory(messages, prompts, chatCompletion, type = nul
         statusBarDepthEntries = collected.depthEntries || [];
         
         // depth와 role별로 그룹화된 atDepth 엔트리를 Map으로 변환 (빠른 검색용)
-        // key: `${depth}-${role}`, value: { instructions, inserted: false }
+        // ⚠️ 중요: 타입을 키에 포함하여 월드인포와 상태창/선택지가 섞이지 않도록 함
+        // key: `statusBar-${depth}-${role}`, value: { instructions, inserted: false, type: 'statusBar' }
         statusBarDepthEntries.forEach(entry => {
-            const key = `${entry.depth}-${entry.role}`;
+            const key = `statusBar-${entry.depth}-${entry.role}`;
             if (!atDepthMap.has(key)) {
-                atDepthMap.set(key, { instructions: [], inserted: false });
+                atDepthMap.set(key, { instructions: [], inserted: false, type: 'statusBar' });
             }
             atDepthMap.get(key).instructions.push(...entry.instructions);
         });
@@ -477,7 +484,30 @@ async function populateChatHistory(messages, prompts, chatCompletion, type = nul
     // 이유: 토큰 예산 초과 시 과거 메시지가 밀려나도록 하기 위함
     // 대필 요청의 경우: [그리팅, 대필지시문] 순서를 유지해야 하지만, 
     // 역순 처리 후 insertAtStart()를 사용하면 최종 순서는 [그리팅, 대필지시문]이 됨
+    // 실리태번과 동일: depth별로 atDepth 엔트리를 먼저 체크하여 삽입할 위치 파악
+    // depth=0부터 messages.length까지 순회하면서 각 depth에 설정된 엔트리 확인
+    // 대필 요청 시에는 제외
     const chatPool = [...messages].reverse(); // 역순 처리: 최근 메시지부터
+    const maxDepth = messages.length > 0 ? messages.length : 0;
+    const depthToInsert = new Map(); // depth -> 삽입할 엔트리들 (role별로)
+    
+    if (!excludeStatusBarChoice) {
+        for (let depth = 0; depth <= maxDepth; depth++) {
+            // 각 depth에서 role별로 엔트리 확인 (system, user, assistant 순서)
+            for (let roleNum = 0; roleNum <= 2; roleNum++) {
+                const key = `statusBar-${depth}-${roleNum}`;
+                if (atDepthMap.has(key) && !atDepthMap.get(key).inserted) {
+                    const entry = atDepthMap.get(key);
+                    if (entry.type === 'statusBar') {
+                        if (!depthToInsert.has(depth)) {
+                            depthToInsert.set(depth, []);
+                        }
+                        depthToInsert.get(depth).push({ entry, roleNum, key });
+                    }
+                }
+            }
+        }
+    }
     let addedCount = 0;
     for (let index = 0; index < chatPool.length; index++) {
         const chatPrompt = chatPool[index];
@@ -505,107 +535,48 @@ async function populateChatHistory(messages, prompts, chatCompletion, type = nul
         // 실리태번의 Generate 함수 (3745번 라인): { isPrompt: true, depth: (coreChat.length - index - (isContinue ? 2 : 1)) }
         // getRegexedString, REGEX_PLACEMENT - 전역 스코프에서 사용
         // depth 계산: 마지막 메시지가 depth=0, 그 이전이 depth=1, ...
-        // 원래 순서대로 처리하므로 depth = (chatPool.length - index - 1)
-        const depth = chatPool.length - index - 1;
+        // ⚠️ 중요: identifier는 chatHistory-${chatPool.length - index}로 생성됨
+        //   index=0 → chatHistory-6 (최근), index=5 → chatHistory-1 (과거)
+        // insertAtStart()로 추가하므로 최종 순서는 [chatHistory-1(과거), ..., chatHistory-6(최근)]
+        // 최종 순서에서 chatHistory-6은 마지막(최근)이므로 depth=0
+        // 최종 순서에서 chatHistory-1은 첫 번째(과거)이므로 depth = chatPool.length - 1
+        // identifier의 숫자 = chatPool.length - index
+        // 최종 순서에서의 위치 = (chatPool.length - index) - 1 (chatHistory-1이 첫 번째이므로)
+        // depth = 최종 순서에서 마지막까지의 거리 = chatPool.length - (chatPool.length - index) = index
+        // 하지만 "마지막 메시지가 depth=0"이므로, depth = 최종 순서에서의 위치
+        // 최종 순서에서 chatHistory-N의 위치 = N - 1 (chatHistory-1이 첫 번째)
+        // depth = (chatPool.length - index) - 1 = chatPool.length - index - 1
+        // 하지만 로그를 보면 chatHistory-1이 depth=0이어야 하는데, 위 계산으로는 depth=5가 됨
+        // 실제로는: identifier 숫자 = chatPool.length - index
+        // 최종 순서에서의 위치 = identifier 숫자 - 1 (chatHistory-1이 첫 번째)
+        // depth = 최종 순서에서 마지막까지의 거리 = chatPool.length - (identifier 숫자 - 1) - 1
+        //   = chatPool.length - (chatPool.length - index - 1) - 1 = index
+        // 따라서 depth = index
+        const identifierNum = chatPool.length - index;
+        const depth = chatPool.length - identifierNum;
         
         // 상태창/선택지 atDepth 엔트리 확인 및 삽입
-        // 현재 메시지의 role을 숫자로 변환 (0=system, 1=user, 2=assistant)
-        const currentRoleNum = chatPrompt.role === 'system' ? 0 : 
-                               chatPrompt.role === 'user' ? 1 : 
-                               chatPrompt.role === 'assistant' ? 2 : 0;
-        const atDepthKey = `${depth}-${currentRoleNum}`;
-        
-        // 해당 depth와 role에 맞는 atDepth 엔트리 찾기
+        // ⚠️ 중요: 실리태번과 동일하게 depth별로 설정된 엔트리를 찾아 삽입
+        // 실제 메시지의 role과 관계없이 해당 depth에 설정된 엔트리를 삽입
         let atDepthEntry = null;
         let matchedKey = null;
         
-        // 1. 정확히 일치하는 키 찾기
-        if (atDepthMap.has(atDepthKey) && !atDepthMap.get(atDepthKey).inserted) {
-            atDepthEntry = atDepthMap.get(atDepthKey);
-            matchedKey = atDepthKey;
-        } else {
-            // 2. Fallback: 같은 depth에서 다른 role의 엔트리 찾기
-            // role=0 (system)은 일반적으로 채팅 히스토리에 없으므로, user 또는 assistant와 매칭
-            // 또한 채팅 히스토리에 system 메시지가 없을 경우 role=0 엔트리는 항상 매칭 시도
-            const depthOnlyKey = `${depth}-`;
-            
-            // 먼저 정확히 같은 depth에서 role=0 (system) 엔트리 찾기
-            for (const [key, entry] of atDepthMap.entries()) {
-                if (key.startsWith(depthOnlyKey) && !entry.inserted) {
-                    const entryRole = parseInt(key.split('-')[1]);
-                    // role=0일 때는 항상 fallback 적용 (system 메시지가 없으므로)
-                    if (entryRole === 0) {
-                        atDepthEntry = entry;
-                        matchedKey = key;
-                        break;
-                    }
-                }
-            }
-            
-            // 위에서 매칭이 안 되면, depth가 0일 때 depth=1 엔트리도 찾기 (사용자가 depth=1로 설정했지만 실제로는 depth=0에 삽입해야 할 수도)
-            if (!atDepthEntry && depth === 0) {
-                for (const [key, entry] of atDepthMap.entries()) {
-                    const entryDepth = parseInt(key.split('-')[0]);
-                    const entryRole = parseInt(key.split('-')[1]);
-                    // depth=1이고 role=0인 엔트리를 depth=0에서 찾기
-                    if (entryDepth === 1 && entryRole === 0 && !entry.inserted) {
-                        atDepthEntry = entry;
-                        matchedKey = key;
-                        break;
-                    }
-                }
-            }
-            
-            // 위에서 매칭이 안 되고, 정확히 같은 role일 때만 추가 매칭 시도
-            if (!atDepthEntry) {
-                for (const [key, entry] of atDepthMap.entries()) {
-                    if (key.startsWith(depthOnlyKey) && !entry.inserted) {
-                        const entryRole = parseInt(key.split('-')[1]);
-                        // 정확히 같은 role일 때만 매칭
-                        if (entryRole === currentRoleNum) {
-                            atDepthEntry = entry;
-                            matchedKey = key;
-                            break;
-                        }
-                    }
+        // depth별 삽입 예정 엔트리에서 현재 depth에 해당하는 엔트리 찾기
+        if (depthToInsert.has(depth)) {
+            const entriesForDepth = depthToInsert.get(depth);
+            // role 순서대로 확인 (system, user, assistant)
+            for (const { entry, roleNum, key } of entriesForDepth) {
+                if (!entry.inserted) {
+                    atDepthEntry = entry;
+                    matchedKey = key;
+                    break;
                 }
             }
         }
         
-        // atDepth 엔트리 삽입
-        if (atDepthEntry) {
-            // Status Bar/Choice 지시문에서 {{user}}, {{char}} 등 매크로 치환
-            const rawAtDepthText = atDepthEntry.instructions.join('\n');
-            const atDepthText = substituteParams(rawAtDepthText, name1, name2);
-            
-            try {
-                // atDepth 메시지는 원래 설정된 role이 아닌 현재 메시지의 role을 사용
-                const atDepthMessage = await Message.createAsync(
-                    chatPrompt.role,
-                    atDepthText,
-                    `statusBarChoice-atDepth-${depth}-${currentRoleNum}`,
-                    tokenCountFn
-                );
-                
-                // 현재 메시지 앞에 atDepth 메시지 삽입
-                // ⚠️ 중요: insertAtStart()를 사용하여 역순 처리된 chatPool과 일관성 유지
-                // atDepth를 먼저 추가하고 그 다음에 일반 메시지를 추가하면 최종 순서는 [atDepth, 일반메시지]가 됨
-                if (chatCompletion.canAfford(atDepthMessage)) {
-                    chatCompletion.insertAtStart(atDepthMessage, 'chatHistory');
-                    atDepthEntry.inserted = true; // 삽입 완료 표시
-                } else {
-                    // 경고 코드 토스트 알림 표시
-                    if (typeof showErrorCodeToast === 'function') {
-                        showErrorCodeToast('WARN_AI_20004', `atDepth 엔트리 삽입 실패: 토큰 예산 부족 (depth=${depth}, role=${chatPrompt.role})`);
-                    }
-                }
-            } catch (error) {
-                // 오류 코드 토스트 알림 표시
-                if (typeof showErrorCodeToast === 'function') {
-                    showErrorCodeToast('ERR_AI_5005', 'atDepth 삽입 오류', error);
-                }
-            }
-        }
+        const currentRoleNum = chatPrompt.role === 'system' ? 0 : 
+                               chatPrompt.role === 'user' ? 1 : 
+                               chatPrompt.role === 'assistant' ? 2 : 0;
         
         const regexPlacement = chatPrompt.role === 'user' ? REGEX_PLACEMENT.USER_INPUT : REGEX_PLACEMENT.AI_OUTPUT;
         
@@ -648,8 +619,76 @@ async function populateChatHistory(messages, prompts, chatCompletion, type = nul
         // 역순 처리된 chatPool을 insertAtStart()로 추가하면 최종 순서는 [과거...최근]이 됨
         // [그리팅, 대필지시문] 순서로 입력되어도 insertAtStart()로 추가되면 최종 순서는 [그리팅, 대필지시문]이 됨
         if (chatCompletion.canAfford(chatMessage)) {
-            chatCompletion.insertAtStart(chatMessage, 'chatHistory');
-            addedCount++;
+            try {
+                chatCompletion.insertAtStart(chatMessage, 'chatHistory');
+                addedCount++;
+                
+                // atDepth 엔트리 삽입: 메시지를 먼저 추가한 후, 그 메시지 바로 앞에 삽입
+                // ⚠️ 중요: 역순 처리에서 insertAtStart()로 메시지를 추가하면, 
+                // chatHistoryCollection.collection의 맨 앞에 추가되므로, 
+                // atDepth를 추가하려면 메시지가 추가된 후 그 위치(인덱스 0)에 삽입해야 함
+                if (atDepthEntry && !atDepthEntry.inserted) {
+                    // Status Bar/Choice 지시문에서 {{user}}, {{char}} 등 매크로 치환
+                    const rawAtDepthText = atDepthEntry.instructions.join('\n');
+                    const atDepthText = substituteParams(rawAtDepthText, name1, name2);
+                    
+                    try {
+                        // ⚠️ 중요: matchedKey에서 실제 depth와 role을 추출하여 사용
+                        // matchedKey 형식: statusBar-${entryDepth}-${entryRole}
+                        let actualDepth = depth;
+                        let actualRole = currentRoleNum;
+                        if (matchedKey) {
+                            const keyParts = matchedKey.split('-');
+                            if (keyParts.length >= 3 && keyParts[0] === 'statusBar') {
+                                actualDepth = parseInt(keyParts[1]);
+                                actualRole = parseInt(keyParts[2]);
+                            }
+                        }
+                        
+                        // atDepth 메시지의 role은 엔트리의 실제 role을 사용
+                        // role=0=system, role=1=user, role=2=assistant
+                        const atDepthRole = actualRole === 0 ? 'system' : 
+                                           (actualRole === 1 ? 'user' : 
+                                           (actualRole === 2 ? 'assistant' : 'system'));
+                        
+                        const atDepthMessage = await Message.createAsync(
+                            atDepthRole,
+                            atDepthText,
+                            `statusBarChoice-atDepth-${actualDepth}-${actualRole}`,
+                            tokenCountFn
+                        );
+                        
+                        // 현재 메시지 앞에 atDepth 메시지 삽입
+                        // chatMessage가 이미 맨 앞(인덱스 0)에 추가되었으므로, 
+                        // insert()를 사용하여 인덱스 0에 삽입하면 [atDepth, chatMessage] 순서가 됨
+                        if (chatCompletion.canAfford(atDepthMessage)) {
+                            try {
+                                chatCompletion.insert(atDepthMessage, 'chatHistory', 0);
+                                atDepthEntry.inserted = true; // 삽입 완료 표시
+                            } catch (error) {
+                                if (typeof showErrorCodeToast === 'function') {
+                                    showErrorCodeToast('WARN_AI_20006', `chatHistory 컬렉션을 찾을 수 없음: ${error.message}`);
+                                }
+                            }
+                        } else {
+                            // 경고 코드 토스트 알림 표시
+                            if (typeof showErrorCodeToast === 'function') {
+                                showErrorCodeToast('WARN_AI_20004', `atDepth 엔트리 삽입 실패: 토큰 예산 부족 (depth=${depth}, role=${chatPrompt.role})`);
+                            }
+                        }
+                    } catch (error) {
+                        // 오류 코드 토스트 알림 표시
+                        if (typeof showErrorCodeToast === 'function') {
+                            showErrorCodeToast('ERR_AI_5005', 'atDepth 삽입 오류', error);
+                        }
+                    }
+                }
+            } catch (error) {
+                if (typeof showErrorCodeToast === 'function') {
+                    showErrorCodeToast('WARN_AI_20007', `chatHistory 컬렉션을 찾을 수 없음: ${error.message}`);
+                }
+                break; // 더 이상 메시지를 추가할 수 없음
+            }
         } else {
             // 경고 코드 토스트 알림 표시
             if (typeof showErrorCodeToast === 'function') {
@@ -713,8 +752,8 @@ async function populateChatHistory(messages, prompts, chatCompletion, type = nul
     }
 
     // 실리태번과 동일: Insert and free new chat (889-890번 라인)
+    // newChatMessage는 이미 위에서 추가했으므로 여기서는 freeBudget만 수행
     if (newChatMessage) {
         chatCompletion.freeBudget(newChatMessage);
-        chatCompletion.insertAtStart(newChatMessage, 'chatHistory');
     }
 }
