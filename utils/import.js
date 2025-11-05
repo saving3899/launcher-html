@@ -581,6 +581,8 @@ async function importChat(file) {
         // 채팅 데이터 구성 (우리 형식)
         // 불러오기한 채팅의 lastMessageDate는 불러온 시간으로 설정 (채팅 목록에서 최신순 정렬 반영)
         const importedDate = Date.now(); // 불러온 시간
+        // ⚠️ 중요: 불러온 채팅도 일반 채팅처럼 저장 (isImported 플래그 제거)
+        // 불러온 채팅을 저장할 때부터 일반 채팅처럼 취급하여 그리팅 추가 문제 방지
         const chatData = {
             characterId: characterId, // 없으면 null
             chatName: finalChatName, // 중복 방지된 제목 사용
@@ -588,13 +590,14 @@ async function importChat(file) {
                 user_name: metadata.user_name || 'User',
                 character_name: characterName,
                 create_date: createDate, // 원본 채팅의 생성 날짜 (실리태번 호환)
-                imported_date: importedDate, // 불러온 시간 (정렬용)
                 chat_metadata: metadata.chat_metadata || {},
-                isImported: true, // 불러오기한 채팅 표시
+                // isImported와 imported_date 제거: 일반 채팅처럼 취급
             },
             messages: convertedMessages,
-            // 불러오기한 채팅은 불러온 시간을 lastMessageDate로 사용 (채팅 목록 정렬 반영)
-            lastMessageDate: importedDate,
+            // 마지막 메시지의 send_date를 lastMessageDate로 사용 (일반 채팅과 동일)
+            lastMessageDate: convertedMessages.length > 0 && convertedMessages[convertedMessages.length - 1]?.send_date
+                ? convertedMessages[convertedMessages.length - 1].send_date
+                : importedDate, // 메시지가 없으면 불러온 시간 사용
         };
         
         // 채팅 저장

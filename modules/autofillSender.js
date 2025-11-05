@@ -150,15 +150,30 @@ async function sendAIMessageForAutofill(userMessage, chatManager) {
     // chatManager.chat 배열에 메시지가 있으면 이미 채팅이 진행 중이므로 그리팅을 추가하지 않음
     const hasChatMessages = chatManager.chat && chatManager.chat.length > 0;
     
+    // ⚠️ [실리태번 방식으로 변경] 불러온 채팅도 일반 채팅처럼 취급하므로 isImportedChat 체크 제거
+    // 실리태번은 불러온 채팅에 특별한 플래그를 추가하지 않으며, chat.length === 0 조건만으로 그리팅 추가 여부를 결정합니다.
+    // 기존 코드 (주석 처리):
+    // let isImportedChat = false;
+    // if (chatManager.currentChatId) {
+    //     try {
+    //         const storedChatData = await ChatStorage.load(chatManager.currentChatId);
+    //         if (storedChatData) {
+    //             isImportedChat = storedChatData.metadata?.isImported === true;
+    //         }
+    //     } catch (error) {
+    //         console.debug('[AutofillSender] 저장된 채팅 확인 중 오류 (무시):', error);
+    //     }
+    // }
+    
     // 그리팅이 있는지 확인
     const hasGreeting = chatHistory.some(m => m.role === 'assistant' && m.content && m.content.trim());
     
-    // 그리팅 추가 조건 (모든 조건을 만족해야 함):
-    // 1. DOM에 메시지 요소가 0개일 때만 (가장 중요 - 실제 DOM 상태 확인)
-    // 2. chatManager.chat 배열에 메시지가 0개일 때만 (두 번째로 중요)
-    // 3. chatHistory 배열이 0개일 때
-    // 4. 그리팅이 없을 때
-    // ⚠️ 중요: hasDomMessages 또는 hasChatMessages가 true이면 절대 그리팅 추가 안 함
+    // ⚠️ [실리태번 방식으로 변경] chat.length === 0 조건만으로 그리팅 추가 여부 결정
+    // 실리태번은 불러온 채팅과 일반 채팅을 구분하지 않으며, 단순히 메시지가 없으면 그리팅을 추가합니다.
+    // 불러온 채팅은 이미 메시지가 있으므로 자동으로 그리팅이 추가되지 않습니다.
+    // 기존 코드 (주석 처리):
+    // if (!isImportedChat && !hasDomMessages && !hasChatMessages && chatHistory.length === 0 && !hasGreeting) {
+    // 실리태번 방식: hasDomMessages, hasChatMessages, chatHistory.length === 0 조건만 확인
     if (!hasDomMessages && !hasChatMessages && chatHistory.length === 0 && !hasGreeting) {
         const firstMessage = character?.data?.first_mes || character?.first_mes || '';
         if (firstMessage && firstMessage.trim()) {

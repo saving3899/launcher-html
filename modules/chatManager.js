@@ -3880,10 +3880,6 @@ class ChatManager {
         // 중복 저장 방지
         if (this._isSavingChat) {
             console.debug('[ChatManager.saveChat] 이미 저장 중이므로 건너뜀');
-            // 경고 코드 토스트 알림 표시
-            if (typeof showErrorCodeToast === 'function') {
-                showErrorCodeToast('WARN_CHAT_20011', '이미 저장 중이므로 무시');
-            }
             return;
         }
         
@@ -4002,39 +3998,36 @@ class ChatManager {
                     // 기존 채팅 데이터 로드 (메타데이터 보존용)
                     existingChatData = await ChatStorage.load(chatId);
                     
-                    // ⚠️ 중요: 불러온 채팅(isImported)인 경우 UUID 매칭 건너뛰기
-                    // 불러온 채팅은 항상 기존 채팅에 저장해야 하며, 새 채팅으로 저장되면 안 됨
-                    if (existingChatData && existingChatData.metadata?.isImported) {
-                        console.debug('[ChatManager.saveChat] 불러온 채팅 감지, UUID 매칭 건너뛰고 기존 채팅에 저장:', {
-                            chatId: chatId.substring(0, 50),
-                            messageCount: existingChatData.messages?.length || 0
-                        });
-                        // chatId가 이미 설정되어 있으므로 UUID 매칭 블록을 건너뛰도록 함
-                    }
+                    // ⚠️ [실리태번 방식으로 변경] 불러온 채팅도 일반 채팅처럼 취급하므로 특별 처리 불필요
+                    // 실리태번은 불러온 채팅에 특별한 플래그를 추가하지 않으므로, UUID 매칭에서도 구분하지 않습니다.
+                    // 기존 코드 (주석 처리):
+                    // if (existingChatData && existingChatData.metadata?.isImported) {
+                    //     console.debug('[ChatManager.saveChat] 불러온 채팅 감지, UUID 매칭 건너뛰고 기존 채팅에 저장:', {
+                    //         chatId: chatId.substring(0, 50),
+                    //         messageCount: existingChatData.messages?.length || 0
+                    //     });
+                    // }
                 }
             }
             
             // currentChatId가 null이거나 characterId와 같으면 새로 찾기
-            // ⚠️ 중요: 불러온 채팅인 경우 UUID 매칭 건너뛰기 (이미 위에서 chatId 설정됨)
+            // ⚠️ [실리태번 방식으로 변경] 불러온 채팅도 일반 채팅처럼 취급하므로 특별 처리 불필요
+            // 실리태번은 불러온 채팅에 특별한 플래그를 추가하지 않으므로, UUID 매칭에서도 구분하지 않습니다.
+            // 기존 코드 (주석 처리):
+            // if (this._isImportedChat) {
+            //     console.debug('[ChatManager.saveChat] 불러온 채팅 감지, UUID 매칭 건너뛰기:', {
+            //         isImportedChat: this._isImportedChat,
+            //         chatArrayLength: this.chat?.length || 0
+            //     });
+            //     if (!this.currentChatId) {
+            //         console.warn('[ChatManager.saveChat] 불러온 채팅인데 currentChatId가 없음, 저장 건너뜀');
+            //         this._isSavingChat = false;
+            //         return;
+            //     }
+            //     chatId = this.currentChatId;
+            //     existingChatData = await ChatStorage.load(chatId);
+            // } else {
             if (!chatId) {
-                // ⚠️ 중요: 불러온 채팅인 경우 UUID 매칭 건너뛰기
-                // 불러온 채팅은 this.chat에 메시지가 있어도 새 채팅으로 저장되면 안 됨
-                if (this._isImportedChat) {
-                    console.debug('[ChatManager.saveChat] 불러온 채팅 감지, UUID 매칭 건너뛰기:', {
-                        isImportedChat: this._isImportedChat,
-                        chatArrayLength: this.chat?.length || 0
-                    });
-                    // chatId가 null이지만 불러온 채팅이므로 새 채팅 생성 안 함
-                    // currentChatId가 설정되어 있지 않으면 오류 상황
-                    if (!this.currentChatId) {
-                        console.warn('[ChatManager.saveChat] 불러온 채팅인데 currentChatId가 없음, 저장 건너뜀');
-                        this._isSavingChat = false;
-                        return;
-                    }
-                    // currentChatId가 있으면 그것을 사용
-                    chatId = this.currentChatId;
-                    existingChatData = await ChatStorage.load(chatId);
-                } else {
                     // ⚠️ 중요: 새 채팅 생성 직후 판단
                     // createNewChat() 직후에는:
                     // 1. this.chat이 비어있거나 새로 생성된 그리팅 1개만 있어야 함
@@ -4075,11 +4068,12 @@ class ChatManager {
                                         continue;
                                     }
                                     
-                                    // ⚠️ 중요: 불러온 채팅(isImported)은 UUID 매칭에서 제외
-                                    // 불러온 채팅의 UUID가 새 채팅 생성 시 잘못 매칭되는 것을 방지
-                                    if (candidateChatData.metadata?.isImported) {
-                                        continue;
-                                    }
+                                    // ⚠️ [실리태번 방식으로 변경] 불러온 채팅도 일반 채팅처럼 취급하므로 UUID 매칭에서 제외하지 않음
+                                    // 실리태번은 불러온 채팅에 특별한 플래그를 추가하지 않으므로, UUID 매칭에서도 구분하지 않습니다.
+                                    // 기존 코드 (주석 처리):
+                                    // if (candidateChatData.metadata?.isImported) {
+                                    //     continue;
+                                    // }
                                     
                                     const candidateMessages = candidateChatData.messages || [];
                                     const candidateUuids = candidateMessages.map(msg => msg.uuid).filter(uuid => uuid);
@@ -4709,11 +4703,12 @@ class ChatManager {
                                         continue;
                                     }
                                     
-                                    // ⚠️ 중요: 불러온 채팅(isImported)은 UUID 매칭에서 제외
-                                    // 불러온 채팅의 UUID가 새 채팅 생성 시 잘못 매칭되는 것을 방지
-                                    if (candidateChatData.metadata?.isImported) {
-                                        continue;
-                                    }
+                                    // ⚠️ [실리태번 방식으로 변경] 불러온 채팅도 일반 채팅처럼 취급하므로 UUID 매칭에서 제외하지 않음
+                                    // 실리태번은 불러온 채팅에 특별한 플래그를 추가하지 않으므로, UUID 매칭에서도 구분하지 않습니다.
+                                    // 기존 코드 (주석 처리):
+                                    // if (candidateChatData.metadata?.isImported) {
+                                    //     continue;
+                                    // }
                                     
                                     const candidateMessages = candidateChatData.messages || [];
                                     const candidateUuids = candidateMessages.map(msg => msg.uuid).filter(uuid => uuid);
@@ -5106,7 +5101,6 @@ class ChatManager {
                     }
                 }
             }
-            }
             
             // 안전장치: DOM에서 메시지가 없는데 this.chat에는 메시지가 있으면 경고 (domMessages가 수집된 경우에만)
             if (domMessages !== null && domMessages.length === 0 && this.chat && this.chat.length > 0) {
@@ -5197,6 +5191,12 @@ class ChatManager {
             
             // 메타데이터 생성 (기존 메타데이터 보존)
             const existingMetadata = existingChatData?.metadata || {};
+            // ⚠️ [실리태번 방식으로 변경] 불러온 채팅도 일반 채팅처럼 취급하므로 특별 처리 불필요
+            // 실리태번은 불러온 채팅에 특별한 플래그를 추가하지 않으므로, 저장 시 특별 처리할 필요가 없습니다.
+            // 기존 코드 (주석 처리):
+            // const isImportedBeforeSave = existingMetadata?.isImported === true;
+            // const { isImported, imported_date, ...restMetadata } = existingMetadata;
+            // 실리태번 방식: 기존 메타데이터를 그대로 사용 (isImported 플래그 없음)
             const metadata = {
                 user_name: existingMetadata.user_name || 'User',
                 character_name: characterName,
@@ -5208,17 +5208,27 @@ class ChatManager {
                 },
             };
 
+            // ⚠️ [실리태번 방식으로 변경] 불러온 채팅도 일반 채팅처럼 취급하므로 그리팅 필터링 불필요
+            // 실리태번은 불러온 채팅에 특별한 플래그를 추가하지 않으므로, 저장 시 그리팅을 필터링할 필요가 없습니다.
+            // 불러온 채팅은 이미 메시지가 있으므로 그리팅이 자동으로 추가되지 않습니다.
+            // 기존 코드 (주석 처리):
+            // if (isImportedBeforeSave && existingChatData && existingChatData.messages && existingChatData.messages.length > 0) {
+            //     ... 그리팅 필터링 로직 ...
+            // }
+            // 실리태번 방식: messages를 그대로 저장
+            let messagesToSave = messages;
+
             // 채팅 데이터 구성 (기존 데이터 보존)
             // characterId를 최상위와 metadata 모두에 저장하여 안전성 확보
             const chatData = {
                 characterId: this.currentCharacterId, // 필수: 채팅 필터링에 사용
                 chatName: finalChatName,
                 metadata, // metadata에도 characterId 포함
-                messages,
+                messages: messagesToSave,
                 // lastMessageDate: 메시지가 있으면 마지막 메시지의 send_date 사용, 없으면 기존 값 유지
-                lastMessageDate: messages.length > 0 ? (() => {
+                lastMessageDate: messagesToSave.length > 0 ? (() => {
                     // send_date 기준으로 정렬하여 마지막 메시지 찾기
-                    const sortedMessages = [...messages].sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
+                    const sortedMessages = [...messagesToSave].sort((a, b) => (a.send_date || 0) - (b.send_date || 0));
                     const lastMessage = sortedMessages[sortedMessages.length - 1];
                     // send_date가 있으면 사용, 없으면 다른 필드 시도
                     return lastMessage.send_date || 
@@ -5432,16 +5442,19 @@ class ChatManager {
         this.currentCharacterId = chatData.characterId;
         this.chatCreateDate = chatData.metadata.create_date || Date.now();
         
-        // ⚠️ 중요: 불러온 채팅인 경우 플래그 설정 (saveChat에서 UUID 매칭 건너뛰기용)
-        if (chatData.metadata?.isImported) {
-            this._isImportedChat = true;
-            console.debug('[ChatManager.loadChat] 불러온 채팅 감지, 플래그 설정:', {
-                chatId: chatId.substring(0, 50),
-                messageCount: chatData.messages?.length || 0
-            });
-        } else {
-            this._isImportedChat = false;
-        }
+        // ⚠️ [실리태번 방식으로 변경] 불러온 채팅도 일반 채팅과 동일하게 처리
+        // 실리태번은 불러온 채팅에 특별한 플래그를 추가하지 않으며, chat.length === 0 조건만으로 그리팅 추가 여부를 결정합니다.
+        // 기존 코드 (주석 처리):
+        // if (chatData.metadata?.isImported) {
+        //     this._isImportedChat = true;
+        //     console.debug('[ChatManager.loadChat] 불러온 채팅 감지 (저장 시 일반 채팅으로 변환됨):', {
+        //         chatId: chatId.substring(0, 50),
+        //         messageCount: chatData.messages?.length || 0
+        //     });
+        // } else {
+        //     this._isImportedChat = false;
+        // }
+        // 실리태번 방식: 불러온 채팅도 일반 채팅처럼 취급 (플래그 없음)
 
             // 실리태번과 동일: 전체 메시지를 chat 배열에 저장 (인덱스 0부터 시작)
             // 메시지 순서는 저장 시 이미 확정됨 (불러오기 시 파일 순서 유지)
@@ -5680,11 +5693,14 @@ class ChatManager {
                     }
                 }
                 
-                // ⚠️ 중요: 불러온 채팅의 경우 유저 메시지의 원본 이름 보존
-                // 불러온 채팅이 아니면 originalUserName을 전달하지 않아 현재 페르소나 이름 사용
-                const originalUserName = (this.chat_metadata?.isImported && message.is_user && message.name) 
-                    ? message.name 
-                    : null;
+                // ⚠️ [실리태번 방식으로 변경] 불러온 채팅도 일반 채팅처럼 취급하므로 특별 처리 불필요
+                // 실리태번은 불러온 채팅에 특별한 플래그를 추가하지 않으므로, 원본 이름 보존 로직도 제거합니다.
+                // 기존 코드 (주석 처리):
+                // const originalUserName = (this.chat_metadata?.isImported && message.is_user && message.name)
+                //     ? message.name 
+                //     : null;
+                // 실리태번 방식: 원본 이름 보존 없이 현재 페르소나 이름 사용
+                const originalUserName = null;
                 
                 const wrapper = await this.addMessage(
                     message.mes,
@@ -5851,12 +5867,15 @@ class ChatManager {
         }
 
         // 규칙 5: 메시지가 0개인 채팅을 새로고침하거나 다른 곳에서 돌아오면 그리팅 추가
-        // ⚠️ 중요: 불러온 채팅(isImported)은 절대 그리팅 추가 안 함
-        // ⚠️ 중요: 저장소의 실제 메시지 개수도 확인 (existingMessageCount가 0일 때만 그리팅 추가)
-        // isEmptyChat이 true여도 저장소에 메시지가 있으면 그리팅 추가 안 함
-        const isImportedChat = chatData.metadata?.isImported === true;
-        const storedMessageCount = chatData.messages ? chatData.messages.length : 0;
-        if (!isImportedChat && isEmptyChat && messages.length === 0 && storedMessageCount === 0) {
+        // ⚠️ [실리태번 방식으로 변경] chat.length === 0 조건만으로 그리팅 추가 여부 결정
+        // 실리태번은 불러온 채팅과 일반 채팅을 구분하지 않으며, 단순히 메시지가 없으면 그리팅을 추가합니다.
+        // 불러온 채팅은 이미 메시지가 있으므로 자동으로 그리팅이 추가되지 않습니다.
+        // 기존 코드 (주석 처리):
+        // const isImportedChat = chatData.metadata?.isImported === true;
+        // const storedMessageCount = chatData.messages ? chatData.messages.length : 0;
+        // if (!isImportedChat && isEmptyChat && messages.length === 0 && storedMessageCount === 0) {
+        // 실리태번 방식: messages.length === 0 조건만 확인
+        if (isEmptyChat && messages.length === 0) {
             // 캐릭터 정보 다시 가져오기 (최신 상태)
             // ⚠️ 중요: chatData.characterId를 사용 (this.currentCharacterId는 설정하지 않으므로 사용하지 않음)
             const latestCharacter = await CharacterStorage.load(chatCharacterId);
@@ -5904,6 +5923,16 @@ class ChatManager {
             console.debug('[ChatManager.loadChat] finally 블록 실행 - _isLoadingChat 플래그 해제');
             this._isLoadingChat = false;
             console.debug('[ChatManager.loadChat] ✅ _isLoadingChat 플래그 해제 완료');
+            
+            // ⚠️ [실리태번 방식으로 변경] 불러온 채팅도 일반 채팅처럼 취급하므로 즉시 저장 불필요
+            // 실리태번은 불러온 채팅에 특별한 플래그를 추가하지 않으므로, 저장 시 특별 처리할 필요가 없습니다.
+            // 기존 코드 (주석 처리):
+            // if (this._isImportedChat && this.currentChatId && this.currentCharacterId) {
+            //     console.debug('[ChatManager.loadChat] 불러온 채팅 감지, 즉시 저장하여 isImported 플래그 제거');
+            //     this.saveChat().catch(error => {
+            //         console.debug('[ChatManager.loadChat] 불러온 채팅 저장 중 오류 (무시):', error);
+            //     });
+            // }
             
             // 중요: this.chat 배열은 모든 메시지를 유지해야 함
             // DOM에는 messagesToLoad 설정에 따라 일부만 표시되지만, this.chat은 전체 메시지를 유지
@@ -6215,10 +6244,14 @@ class ChatManager {
                 // 불러오기한 채팅은 imported_date를 우선 사용 (최근 불러온 채팅으로 표시)
                 let lastMessageDate = 0;
                 
-                // 불러오기한 채팅은 imported_date를 우선 사용
-                if (chatData.metadata?.isImported && chatData.metadata?.imported_date) {
-                    lastMessageDate = chatData.metadata.imported_date;
-                } else if (chatData.lastMessageDate) {
+                // ⚠️ [실리태번 방식으로 변경] 불러온 채팅도 일반 채팅처럼 취급하므로 imported_date 체크 불필요
+                // 실리태번은 불러온 채팅에 특별한 플래그를 추가하지 않으므로, imported_date를 체크할 필요가 없습니다.
+                // 기존 코드 (주석 처리):
+                // if (chatData.metadata?.isImported && chatData.metadata?.imported_date) {
+                //     lastMessageDate = chatData.metadata.imported_date;
+                // } else if (chatData.lastMessageDate) {
+                // 실리태번 방식: lastMessageDate를 그대로 사용
+                if (chatData.lastMessageDate) {
                         lastMessageDate = chatData.lastMessageDate;
                 } else if (hasMessages) {
                     // lastMessageDate가 없으면 메시지 배열의 마지막 메시지 타임스탬프 사용
@@ -6554,8 +6587,15 @@ class ChatManager {
 
         // 채팅 로드
         if (chatToLoad) {
+            // ⚠️ [실리태번 방식으로 변경] 불러온 채팅도 일반 채팅처럼 취급하므로 특별 처리 불필요
+            // 실리태번은 불러온 채팅에 특별한 플래그를 추가하지 않으며, chat.length === 0 조건만으로 그리팅 추가 여부를 결정합니다.
+            // 기존 코드 (주석 처리):
+            // const isImported = chatToLoad.chatData.metadata?.isImported === true;
+            // const isEmptyChat = isImported ? false : (chatToLoad.messageCount === 0);
+            // 실리태번 방식: messageCount만 확인
+            const isEmptyChat = chatToLoad.messageCount === 0;
             
-            await this.loadChat(chatToLoad.chatId, chatToLoad.messageCount === 0);
+            await this.loadChat(chatToLoad.chatId, isEmptyChat);
             
             // ⚠️ 중요: loadChat 후에 this.currentCharacterId 설정
             // loadChat에서는 this.currentCharacterId를 설정하지 않으므로 여기서 설정
@@ -6581,7 +6621,14 @@ class ChatManager {
             chatToLoad = characterChats[0];
             character.chat = chatToLoad.chatData.chatName;
             await CharacterStorage.save(characterId, character);
-            await this.loadChat(chatToLoad.chatId, chatToLoad.messageCount === 0);
+            // ⚠️ [실리태번 방식으로 변경] 불러온 채팅도 일반 채팅처럼 취급하므로 특별 처리 불필요
+            // 실리태번은 불러온 채팅에 특별한 플래그를 추가하지 않으며, chat.length === 0 조건만으로 그리팅 추가 여부를 결정합니다.
+            // 기존 코드 (주석 처리):
+            // const isImported = chatToLoad.chatData.metadata?.isImported === true;
+            // const isEmptyChat = isImported ? false : (chatToLoad.messageCount === 0);
+            // 실리태번 방식: messageCount만 확인
+            const isEmptyChat = chatToLoad.messageCount === 0;
+            await this.loadChat(chatToLoad.chatId, isEmptyChat);
             
             // ⚠️ 중요: loadChat 후에 this.currentCharacterId 설정
             // loadChat에서는 this.currentCharacterId를 설정하지 않으므로 여기서 설정
@@ -9077,7 +9124,14 @@ class ChatManager {
                                     // 규칙 2: 가장 최근 채팅으로 전환 또는 규칙 3: 다른 채팅이 없으면 새 채팅 생성
                                     if (characterChats.length > 0) {
                                         const mostRecentChat = characterChats[0];
-                                        await this.loadChat(mostRecentChat.chatId, mostRecentChat.messageCount === 0);
+                                        // ⚠️ [실리태번 방식으로 변경] 불러온 채팅도 일반 채팅처럼 취급하므로 특별 처리 불필요
+                                        // 실리태번은 불러온 채팅에 특별한 플래그를 추가하지 않으며, chat.length === 0 조건만으로 그리팅 추가 여부를 결정합니다.
+                                        // 기존 코드 (주석 처리):
+                                        // const isImported = mostRecentChat.chatData.metadata?.isImported === true;
+                                        // const isEmptyChat = isImported ? false : (mostRecentChat.messageCount === 0);
+                                        // 실리태번 방식: messageCount만 확인
+                                        const isEmptyChat = mostRecentChat.messageCount === 0;
+                                        await this.loadChat(mostRecentChat.chatId, isEmptyChat);
                                         
                                         // ⚠️ 중요: loadChat 후에 this.currentCharacterId 설정
                                         // loadChat에서는 this.currentCharacterId를 설정하지 않으므로 여기서 설정
