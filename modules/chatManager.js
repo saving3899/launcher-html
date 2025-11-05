@@ -2443,6 +2443,7 @@ class ChatManager {
                 // Vertex AI / Gemini의 thought 필드
                 // 실리태번 방식: part.thought가 true이면 그 part의 text가 추론 내용
                 // rawData 구조 확인 (callVertexAI에서 반환한 객체)
+                // 스트리밍 응답에서도 동일하게 처리
                 
                 let allParts = null;
                 if (data?.candidates?.[0]?.content?.parts) {
@@ -2455,6 +2456,9 @@ class ChatManager {
                 
                 if (allParts && Array.isArray(allParts)) {
                     // thought가 true인 part만 추출
+                    // 스트리밍 응답의 경우 각 청크마다 새로운 part가 오거나 기존 part의 text가 업데이트될 수 있음
+                    // 각 청크에서 thought가 true인 part의 text를 모두 추출하여 반환
+                    // (중복 제거는 callAIWithStreaming에서 accumulatedReasoning으로 처리)
                     const thoughtParts = allParts
                         .filter(part => {
                             if (typeof part !== 'object' || part === null) return false;
@@ -2463,6 +2467,8 @@ class ChatManager {
                         })
                         .map(part => String(part.text));
                     
+                    // 스트리밍 응답의 경우 각 청크에서 추론이 점진적으로 올 수 있음
+                    // 각 청크에서 추론 텍스트를 반환 (누적은 callAIWithStreaming에서 처리)
                     return thoughtParts.join('\n\n');
                 }
                 break;
@@ -2802,7 +2808,22 @@ class ChatManager {
                         show_thoughts: options.show_thoughts || options.showThoughts
                     });
                     if (reasoningChunk && reasoningChunk.trim()) {
-                        accumulatedReasoning += reasoningChunk;
+                        // Gemini/Vertex AI 스트리밍 응답의 경우 각 청크에서 추론이 점진적으로 올 수 있음
+                        // 각 청크에서 추론을 추출하여 누적
+                        // 중복 방지: 새로운 추론만 추가 (이미 포함되어 있지 않은 경우)
+                        const reasoningTrimmed = reasoningChunk.trim();
+                        if (!accumulatedReasoning.includes(reasoningTrimmed)) {
+                            // 추론이 누적된 추론에 포함되어 있지 않으면 추가
+                            // 하지만 스트리밍 응답의 경우 각 청크가 이전 청크의 연속일 수 있으므로
+                            // 전체 추론을 업데이트하는 방식 사용
+                            // (각 청크에서 전체 추론 텍스트가 올 수도 있고, 델타만 올 수도 있음)
+                            accumulatedReasoning = reasoningTrimmed;
+                        } else {
+                            // 이미 포함되어 있으면, 더 긴 버전으로 업데이트 (전체 추론 텍스트가 올 수 있음)
+                            if (reasoningTrimmed.length > accumulatedReasoning.length) {
+                                accumulatedReasoning = reasoningTrimmed;
+                            }
+                        }
                         await updateReasoningContent(accumulatedReasoning);
                     }
                 } else if (chunk) {
@@ -3345,15 +3366,18 @@ class ChatManager {
             const actionButtons = document.createElement('div');
             actionButtons.className = 'message-action-buttons';
             
-            // 문서 아이콘 버튼 (맨 왼쪽)
-            const documentBtn = document.createElement('button');
-            documentBtn.className = 'message-action-btn message-document-btn';
-            documentBtn.innerHTML = '<i class="fa-solid fa-file"></i>';
-            documentBtn.setAttribute('aria-label', '프롬프트 정보');
-            documentBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.showPromptInfoModal(messageWrapper);
-            });
+            // 문서 아이콘 버튼 (맨 왼쪽) - assistant 메시지에만 표시
+            let documentBtn = null;
+            if (sender !== 'user') {
+                documentBtn = document.createElement('button');
+                documentBtn.className = 'message-action-btn message-document-btn';
+                documentBtn.innerHTML = '<i class="fa-solid fa-file"></i>';
+                documentBtn.setAttribute('aria-label', '프롬프트 정보');
+                documentBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.showPromptInfoModal(messageWrapper);
+                });
+            }
             
             const editBtn = document.createElement('button');
             editBtn.className = 'message-action-btn message-edit-btn';
@@ -3386,8 +3410,10 @@ class ChatManager {
                 this.deleteMessage(messageWrapper);
             });
             
-            // 버튼 추가 순서: 문서 버튼이 맨 왼쪽
-            actionButtons.appendChild(documentBtn);
+            // 버튼 추가 순서: 문서 버튼이 맨 왼쪽 (유저 메시지가 아닐 때만)
+            if (documentBtn) {
+                actionButtons.appendChild(documentBtn);
+            }
             if (regenerateBtn) {
                 actionButtons.appendChild(regenerateBtn);
             }
@@ -8022,24 +8048,46 @@ class ChatManager {
         const infoContent = document.createElement('div');
         infoContent.className = 'prompt-info-content';
         
+        // API Provider 배지
+        const apiProviderBadge = document.createElement('div');
+        apiProviderBadge.className = 'prompt-info-badge';
+        const apiProviderIcon = document.createElement('div');
+        apiProviderIcon.className = 'prompt-info-icon';
+        apiProviderIcon.innerHTML = '<i class="fa-solid fa-plug"></i>';
+        const apiProviderContent = document.createElement('div');
+        apiProviderContent.className = 'prompt-info-badge-content';
         const apiProviderLabel = document.createElement('div');
-        apiProviderLabel.className = 'prompt-info-label';
-        apiProviderLabel.textContent = 'API Provider:';
+        apiProviderLabel.className = 'prompt-info-badge-label';
+        apiProviderLabel.textContent = 'API Provider';
         const apiProviderValue = document.createElement('div');
-        apiProviderValue.className = 'prompt-info-value';
+        apiProviderValue.className = 'prompt-info-badge-value';
         apiProviderValue.textContent = promptInfo.apiProvider || 'N/A';
+        apiProviderContent.appendChild(apiProviderLabel);
+        apiProviderContent.appendChild(apiProviderValue);
+        apiProviderBadge.appendChild(apiProviderIcon);
+        apiProviderBadge.appendChild(apiProviderContent);
         
+        // Model 배지
+        const modelBadge = document.createElement('div');
+        modelBadge.className = 'prompt-info-badge';
+        const modelIcon = document.createElement('div');
+        modelIcon.className = 'prompt-info-icon';
+        modelIcon.innerHTML = '<i class="fa-solid fa-microchip"></i>';
+        const modelContent = document.createElement('div');
+        modelContent.className = 'prompt-info-badge-content';
         const modelLabel = document.createElement('div');
-        modelLabel.className = 'prompt-info-label';
-        modelLabel.textContent = 'Model:';
+        modelLabel.className = 'prompt-info-badge-label';
+        modelLabel.textContent = 'Model';
         const modelValue = document.createElement('div');
-        modelValue.className = 'prompt-info-value';
+        modelValue.className = 'prompt-info-badge-value';
         modelValue.textContent = promptInfo.model || 'N/A';
+        modelContent.appendChild(modelLabel);
+        modelContent.appendChild(modelValue);
+        modelBadge.appendChild(modelIcon);
+        modelBadge.appendChild(modelContent);
         
-        infoContent.appendChild(apiProviderLabel);
-        infoContent.appendChild(apiProviderValue);
-        infoContent.appendChild(modelLabel);
-        infoContent.appendChild(modelValue);
+        infoContent.appendChild(apiProviderBadge);
+        infoContent.appendChild(modelBadge);
         infoSection.appendChild(infoTitle);
         infoSection.appendChild(infoContent);
         

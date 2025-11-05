@@ -24,7 +24,7 @@ const GEMINI_API_BASE_URL = 'https://generativelanguage.googleapis.com';
  * @param {boolean} options.enableWebSearch - 웹 검색 활성화
  * @param {boolean} options.requestImages - 이미지 요청 활성화
  * @param {boolean} options.useSysprompt - 시스템 프롬프트 사용
- * @returns {Promise<string>} 응답 텍스트
+ * @returns {Promise<string|object>} 응답 텍스트 (스트리밍) 또는 { text, reasoning, rawData } 객체 (비스트리밍)
  */
 async function callGemini({
     apiKey,
@@ -206,60 +206,224 @@ async function callGemini({
             const candidate = candidates[0];
             
             // 실리태번 방식: content가 없으면 output 확인
-            const responseContent = candidate.content ?? candidate.output;
+            let responseContent = candidate.content ?? candidate.output;
             
-            // content가 문자열인 경우 (실리태번 지원)
-            if (typeof responseContent === 'string') {
-                return responseContent;
+            // 추론(thought) 정보 추출을 위해 원본 데이터 보존
+            const originalData = data;
+            
+            // responseContent가 문자열인 경우
+            // 하지만 원본 데이터에서 parts를 확인해서 추론 추출 시도
+            if (typeof responseContent === 'string' && responseContent.trim().length > 0) {
+                // 원본 데이터에서 parts 확인하여 추론 추출
+                // 실리태번 방식: part.thought가 true이면 그 part의 text가 추론
+                let reasoning = '';
+                if (candidate.content && typeof candidate.content === 'object' && candidate.content.parts) {
+                    const thoughtParts = candidate.content.parts
+                        .filter(part => part && typeof part === 'object' && part.thought === true && part.text)
+                        .map(part => String(part.text));
+                    reasoning = thoughtParts.join('\n\n');
+                } else if (candidate.parts) {
+                    const thoughtParts = candidate.parts
+                        .filter(part => part && typeof part === 'object' && part.thought === true && part.text)
+                        .map(part => String(part.text));
+                    reasoning = thoughtParts.join('\n\n');
+                }
+                
+                return {
+                    text: responseContent,
+                    reasoning: reasoning,
+                    rawData: originalData // 추론 추출을 위해 원본 데이터 포함
+                };
             }
             
-            // content가 없거나 parts가 없는 경우 처리
-            if (!responseContent || !responseContent.parts || !Array.isArray(responseContent.parts) || responseContent.parts.length === 0) {
-                // functionCall이나 inlineData가 있는지 확인 (candidate.parts 또는 responseContent.parts)
-                const parts = (responseContent?.parts || candidate.parts || []);
-                const hasFunctionCall = parts.some(part => part?.functionCall);
-                const hasInlineData = parts.some(part => part?.inlineData);
-                
-                if (hasFunctionCall || hasInlineData) {
-                    return '';
+            // content가 없고 output이 문자열인 경우
+            if (!candidate.content && candidate.output && typeof candidate.output === 'string') {
+                // 원본 데이터에서 parts 확인하여 추론 추출
+                // 실리태번 방식: part.thought가 true이면 그 part의 text가 추론
+                let reasoning = '';
+                if (candidate.parts) {
+                    const thoughtParts = candidate.parts
+                        .filter(part => part && typeof part === 'object' && part.thought === true && part.text)
+                        .map(part => String(part.text));
+                    reasoning = thoughtParts.join('\n\n');
                 }
                 
-                // finishReason이 있는 경우 빈 문자열 반환 (응답이 잘렸거나 차단되었을 수 있음)
-                if (candidate.finishReason) {
-                    // MAX_TOKENS는 응답이 잘렸다는 의미이므로 빈 문자열 반환
-                    // SAFETY, STOP 등도 유효한 응답으로 간주
-                    // 테스트 메시지의 경우 빈 응답도 성공으로 처리
-                    return '';
-                }
-                
-                // finishReason도 없고 content도 없는 경우
-                if (!responseContent) {
-                    throw new Error('Gemini API 응답에 내용이 없습니다.');
-                }
-                
-                // content는 있지만 parts가 없는 경우도 빈 문자열 반환 (유효한 응답)
-                return '';
+                return {
+                    text: candidate.output,
+                    reasoning: reasoning,
+                    rawData: originalData
+                };
+            }
+            
+            // responseContent가 객체인 경우 parts 확인
+            let content = responseContent;
+            
+            // content가 없고 candidate에 직접 parts가 있는 경우
+            if (!content && candidate.parts) {
+                content = { parts: candidate.parts };
+            }
+            
+            // content가 아직도 없는 경우
+            if (!content) {
+                throw new Error('Gemini API 응답에 내용이 없습니다.');
+            }
+            
+            // parts가 없는 경우 빈 배열로 처리
+            if (!content.parts) {
+                content.parts = [];
             }
 
-            // parts에서 텍스트 추출
-            const textParts = responseContent.parts
-                .filter(part => part && part.text && !part.thought) // thought 제외
-                .map(part => part.text);
-
-            // functionCall이나 inlineData가 있는지 확인
-            const hasFunctionCall = responseContent.parts.some(part => part?.functionCall);
-            const hasInlineData = responseContent.parts.some(part => part?.inlineData);
-
-            if (textParts.length === 0 && !hasFunctionCall && !hasInlineData) {
-                // finishReason이 있는 경우 빈 문자열 반환 (응답이 잘렸거나 차단되었을 수 있음)
-                if (candidate.finishReason) {
-                    // 테스트 메시지의 경우 빈 응답도 성공으로 처리
-                    return '';
+            // functionCall이나 inlineData가 있는지 확인 (실리태번과 동일)
+            const hasFunctionCall = content.parts.some(part => part.functionCall);
+            const hasInlineData = content.parts.some(part => part.inlineData);
+            
+            // parts에서 텍스트와 추론(thought) 분리 추출
+            const textParts = [];
+            const thoughtParts = [];
+            
+            content.parts.forEach(part => {
+                // part가 직접 문자열인 경우 (텍스트로 처리)
+                if (typeof part === 'string') {
+                    textParts.push(part);
                 }
-                throw new Error('Gemini API 응답에 텍스트가 없습니다.');
+                // part가 객체인 경우
+                else if (typeof part === 'object' && part !== null) {
+                    // 실리태번 방식: part.thought가 있으면 (boolean 플래그), 그 part의 text가 추론 내용
+                    if ('thought' in part && part.thought !== null && part.thought !== undefined) {
+                        // thought가 boolean이면, 그 part의 text를 추론으로 사용
+                        if (typeof part.thought === 'boolean' && part.thought === true) {
+                            // thought가 true인 경우, 이 part의 text는 추론 내용
+                            if ('text' in part && part.text !== null && part.text !== undefined) {
+                                thoughtParts.push(String(part.text));
+                            }
+                        } else if (typeof part.thought !== 'boolean') {
+                            // thought가 문자열이거나 객체인 경우 (구형 형식?), 추론으로 추가
+                            thoughtParts.push(String(part.thought));
+                        }
+                        // thought가 false거나 다른 값이면 무시
+                    }
+                    // thought가 없고 text 속성이 있는 경우 일반 메시지 텍스트로 추가
+                    else if ('text' in part && part.text !== null && part.text !== undefined) {
+                        textParts.push(String(part.text));
+                    }
+                }
+            });
+
+            // 빈 문자열도 포함 (textParts에는 빈 문자열도 포함됨)
+            // 실제로 내용이 있는 텍스트만 확인하기 위한 필터
+            const nonEmptyTextParts = textParts.filter(text => text && text.trim().length > 0);
+            
+            // 추론(thought) 추출
+            const reasoning = thoughtParts.length > 0 ? thoughtParts.join('\n\n') : '';
+            
+            if (nonEmptyTextParts.length === 0 && !hasFunctionCall && !hasInlineData) {
+                // 추론만 있고 텍스트가 없는 경우 (정상적인 경우일 수 있음)
+                if (thoughtParts.length > 0 && textParts.length === 0) {
+                    // 빈 텍스트와 추론 반환
+                    return {
+                        text: '',
+                        reasoning: reasoning,
+                        rawData: originalData
+                    };
+                }
+                
+                // textParts에 빈 문자열이 있는 경우 (finishReason이 STOP이면 정상 응답일 수 있음)
+                if (textParts.length > 0 && textParts.every(text => text === '')) {
+                    // 경고 코드 토스트 알림 표시
+                    if (typeof showErrorCodeToast === 'function') {
+                        showErrorCodeToast('WARN_API_20004', `Gemini가 빈 응답 반환 (finishReason: ${candidate.finishReason})`);
+                    }
+                    // 빈 문자열 반환 (사용자에게 표시될 것)
+                    return {
+                        text: '',
+                        reasoning: reasoning,
+                        rawData: originalData
+                    };
+                }
+                
+                // MAX_TOKENS인 경우 빈 문자열 반환
+                if (candidate.finishReason === 'MAX_TOKENS') {
+                    return {
+                        text: '',
+                        reasoning: reasoning,
+                        rawData: originalData
+                    };
+                }
+                
+                // Safety rating 확인
+                if (candidate.safetyRatings && candidate.safetyRatings.length > 0) {
+                    const blockedRatings = candidate.safetyRatings.filter(r => 
+                        r.probability === 'HIGH' || r.probability === 'MEDIUM'
+                    );
+                    if (blockedRatings.length > 0) {
+                        const error = new Error(`Gemini API 응답이 Safety Settings에 의해 차단되었습니다. (${blockedRatings.map(r => `${r.category}:${r.probability}`).join(', ')})`);
+                        // 오류 코드 토스트 알림 표시
+                        if (typeof showErrorCodeToast === 'function') {
+                            showErrorCodeToast('ERR_API_10020', 'Gemini 응답이 Safety Settings에 의해 차단됨', error);
+                        }
+                        throw error;
+                    }
+                }
+                
+                // finishReason 확인 및 처리
+                if (candidate.finishReason) {
+                    if (candidate.finishReason === 'RECITATION') {
+                        const error = new Error('Gemini API 응답이 RECITATION으로 차단되었습니다. 인용된 콘텐츠가 감지되었습니다.');
+                        // 오류 코드 토스트 알림 표시
+                        if (typeof showErrorCodeToast === 'function') {
+                            showErrorCodeToast('ERR_API_10021', 'Gemini 응답이 RECITATION으로 차단됨', error);
+                        }
+                        throw error;
+                    }
+                    if (candidate.finishReason === 'OTHER') {
+                        const error = new Error('Gemini API 응답이 기타 이유로 차단되었습니다. 프롬프트를 확인해주세요.');
+                        // 오류 코드 토스트 알림 표시
+                        if (typeof showErrorCodeToast === 'function') {
+                            showErrorCodeToast('ERR_API_10022', 'Gemini 비정상적인 finishReason: OTHER', error);
+                        }
+                        throw error;
+                    }
+                    if (candidate.finishReason !== 'STOP' && candidate.finishReason !== 'MAX_TOKENS') {
+                        // 오류 코드 토스트 알림 표시
+                        if (typeof showErrorCodeToast === 'function') {
+                            showErrorCodeToast('ERR_API_10023', `Gemini 비정상적인 finishReason: ${candidate.finishReason}`);
+                        }
+                    }
+                }
+                
+                throw new Error(`Gemini API 응답에 텍스트가 없습니다. (finishReason: ${candidate.finishReason || '없음'}) 프롬프트나 Safety Settings를 확인해주세요.`);
             }
 
-            return textParts.join('\n\n');
+            // functionCall이나 inlineData만 있고 텍스트가 없는 경우
+            if (nonEmptyTextParts.length === 0 && (hasFunctionCall || hasInlineData)) {
+                // 경고 코드 토스트 알림 표시
+                if (typeof showErrorCodeToast === 'function') {
+                    showErrorCodeToast('WARN_API_20005', 'Gemini 텍스트 없지만 functionCall 또는 inlineData 존재');
+                }
+                return {
+                    text: '',
+                    reasoning: reasoning,
+                    rawData: originalData
+                };
+            }
+
+            // 텍스트 추출
+            const finalText = textParts.join('\n\n');
+            
+            // finishReason 확인 및 로깅
+            if (candidate.finishReason === 'MAX_TOKENS' && finalText.length >= 20) {
+                // 경고 코드 토스트 알림 표시
+                if (typeof showErrorCodeToast === 'function') {
+                    showErrorCodeToast('WARN_API_20006', 'Gemini MAX_TOKENS로 응답 중단');
+                }
+            }
+
+            // 추론 정보를 포함한 객체 반환
+            return {
+                text: finalText,
+                reasoning: reasoning, // 추론 내용 (thought)
+                rawData: originalData // 추론 추출을 위해 원본 데이터 포함
+            };
         }
     } catch (error) {
         if (error.name === 'AbortError') {
