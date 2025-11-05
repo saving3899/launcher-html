@@ -201,17 +201,58 @@ async function playMessageSound() {
         audioElement = document.createElement('audio');
         audioElement.id = 'audio_message_sound';
         audioElement.hidden = true;
+        audioElement.preload = 'auto'; // iOS에서 로드 성능 향상
         document.body.appendChild(audioElement);
     }
     
-    // 효과음 URL 설정
-    audioElement.src = soundUrl;
+    // iOS에서 오디오 재생 문제 해결: 오디오를 완전히 초기화하고 로드
+    audioElement.pause();
+    audioElement.currentTime = 0;
+    audioElement.volume = 0.8;
+    
+    // 효과음 URL 설정 (src가 변경되면 자동으로 로드 시작)
+    const isNewSource = audioElement.src !== soundUrl || !audioElement.src;
+    if (isNewSource) {
+        audioElement.src = soundUrl;
+    }
     
     // 효과음 재생 시도
     try {
-        audioElement.volume = 0.8;
-        audioElement.pause();
-        audioElement.currentTime = 0;
+        // iOS에서 오디오 재생 문제 해결: 오디오가 로드될 때까지 대기
+        if (isNewSource || audioElement.readyState < 2) { // HAVE_CURRENT_DATA (2) 미만이면 로드 대기
+            await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    audioElement.removeEventListener('loadeddata', onLoaded);
+                    audioElement.removeEventListener('error', onError);
+                    reject(new Error('오디오 로드 타임아웃'));
+                }, 5000); // 5초 타임아웃
+                
+                const onLoaded = () => {
+                    clearTimeout(timeout);
+                    audioElement.removeEventListener('error', onError);
+                    resolve();
+                };
+                
+                const onError = (e) => {
+                    clearTimeout(timeout);
+                    audioElement.removeEventListener('loadeddata', onLoaded);
+                    reject(new Error('오디오 로드 실패'));
+                };
+                
+                if (audioElement.readyState >= 2) {
+                    // 이미 로드된 경우
+                    clearTimeout(timeout);
+                    resolve();
+                } else {
+                    audioElement.addEventListener('loadeddata', onLoaded, { once: true });
+                    audioElement.addEventListener('error', onError, { once: true });
+                    // load() 호출로 명시적으로 로드 시작 (iOS에서 중요)
+                    audioElement.load();
+                }
+            });
+        }
+        
+        // 오디오 재생
         await audioElement.play();
         // 재생 성공 시 대기 중인 효과음 제거
         pendingSoundUrl = null;
@@ -227,19 +268,58 @@ async function playMessageSound() {
 /**
  * 탭 포커스 시 대기 중인 효과음 재생
  */
-function playPendingSound() {
+async function playPendingSound() {
     if (pendingSoundUrl) {
         const audioElement = document.getElementById('audio_message_sound');
         if (audioElement) {
-            audioElement.src = pendingSoundUrl;
-            audioElement.volume = 0.8;
-            audioElement.pause();
-            audioElement.currentTime = 0;
-            audioElement.play().then(() => {
+            try {
+                // iOS에서 오디오 재생 문제 해결: 오디오를 완전히 초기화하고 로드
+                audioElement.pause();
+                audioElement.currentTime = 0;
+                audioElement.volume = 0.8;
+                
+                const isNewSource = audioElement.src !== pendingSoundUrl || !audioElement.src;
+                if (isNewSource) {
+                    audioElement.src = pendingSoundUrl;
+                }
+                
+                // iOS에서 오디오 재생 문제 해결: 오디오가 로드될 때까지 대기
+                if (isNewSource || audioElement.readyState < 2) {
+                    await new Promise((resolve, reject) => {
+                        const timeout = setTimeout(() => {
+                            audioElement.removeEventListener('loadeddata', onLoaded);
+                            audioElement.removeEventListener('error', onError);
+                            reject(new Error('오디오 로드 타임아웃'));
+                        }, 5000);
+                        
+                        const onLoaded = () => {
+                            clearTimeout(timeout);
+                            audioElement.removeEventListener('error', onError);
+                            resolve();
+                        };
+                        
+                        const onError = (e) => {
+                            clearTimeout(timeout);
+                            audioElement.removeEventListener('loadeddata', onLoaded);
+                            reject(new Error('오디오 로드 실패'));
+                        };
+                        
+                        if (audioElement.readyState >= 2) {
+                            clearTimeout(timeout);
+                            resolve();
+                        } else {
+                            audioElement.addEventListener('loadeddata', onLoaded, { once: true });
+                            audioElement.addEventListener('error', onError, { once: true });
+                            audioElement.load();
+                        }
+                    });
+                }
+                
+                await audioElement.play();
                 pendingSoundUrl = null; // 재생 성공 시 대기 중인 효과음 제거
-            }).catch((error) => {
+            } catch (error) {
                 console.debug('[playPendingSound] 효과음 재생 실패:', error);
-            });
+            }
         }
     }
 }
